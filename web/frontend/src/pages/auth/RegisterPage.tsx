@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Eye, EyeOff, UserPlus } from 'lucide-react'
 import api, { getErrorMessage } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/components/ui/Toast'
@@ -41,7 +40,7 @@ export default function RegisterPage() {
         password: data.password,
       })
       setAuth(res.data.user, res.data.access_token, res.data.refresh_token)
-      toast.success('Account created! Let\'s set up your profile.')
+      toast.success('Bio-profile registered! Initializing onboarding calibration...')
       navigate('/onboarding')
     } catch (err) {
       toast.error(getErrorMessage(err))
@@ -49,100 +48,130 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Create your account</h1>
-        <p className="text-gray-400 mt-1">Start your accessible fitness journey today</p>
+    <div className="animate-fade-in text-on-surface">
+      <div className="mb-6">
+        <h1 className="text-2xl font-black text-on-surface font-headline-md tracking-tight">Register Bio-Profile</h1>
+        <p className="text-on-surface-variant text-sm mt-1">Join the autonomous precision fitness ecosystem</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div>
-          <label htmlFor="display_name" className="label">Your name</label>
+          <label htmlFor="display_name" className="block text-xs font-label-sm text-on-surface-variant uppercase tracking-wider mb-1.5">
+            Full Name / Call-Sign
+          </label>
           <input
             id="display_name"
             type="text"
             autoComplete="name"
-            className={`input ${errors.display_name ? 'input-error' : ''}`}
-            placeholder="Alex Johnson"
+            className={`w-full px-4 py-2.5 rounded-xl bg-surface-container border text-sm text-on-surface transition-all focus:outline-none ${
+              errors.display_name ? 'border-error focus:border-error' : 'border-outline-variant/40 focus:border-primary-container focus:ring-1 focus:ring-primary-container'
+            }`}
+            placeholder="Alex Rivera"
             aria-describedby={errors.display_name ? 'name-error' : undefined}
             aria-invalid={!!errors.display_name}
             {...register('display_name')}
           />
-          {errors.display_name && <p id="name-error" className="error-message" role="alert">{errors.display_name.message}</p>}
+          {errors.display_name && (
+            <p id="name-error" className="text-xs text-error mt-1" role="alert">{errors.display_name.message}</p>
+          )}
         </div>
 
         <div>
-          <label htmlFor="email" className="label">Email address</label>
+          <label htmlFor="email" className="block text-xs font-label-sm text-on-surface-variant uppercase tracking-wider mb-1.5">
+            Email Address
+          </label>
           <input
             id="email"
             type="email"
             autoComplete="email"
-            className={`input ${errors.email ? 'input-error' : ''}`}
-            placeholder="you@example.com"
+            className={`w-full px-4 py-2.5 rounded-xl bg-surface-container border text-sm text-on-surface transition-all focus:outline-none ${
+              errors.email ? 'border-error focus:border-error' : 'border-outline-variant/40 focus:border-primary-container focus:ring-1 focus:ring-primary-container'
+            }`}
+            placeholder="alex@fitgenius.ai"
             aria-describedby={errors.email ? 'email-error' : undefined}
             aria-invalid={!!errors.email}
             {...register('email')}
           />
-          {errors.email && <p id="email-error" className="error-message" role="alert">{errors.email.message}</p>}
+          {errors.email && (
+            <p id="email-error" className="text-xs text-error mt-1" role="alert">{errors.email.message}</p>
+          )}
         </div>
 
         <div>
-          <label htmlFor="password" className="label">Password</label>
+          <label htmlFor="password" className="block text-xs font-label-sm text-on-surface-variant uppercase tracking-wider mb-1.5">
+            Password (min 8 characters, 1 number)
+          </label>
           <div className="relative">
             <input
               id="password"
               type={showPassword ? 'text' : 'password'}
               autoComplete="new-password"
-              className={`input pr-10 ${errors.password ? 'input-error' : ''}`}
-              placeholder="Min. 8 chars, letter + number"
-              aria-describedby={errors.password ? 'password-error' : 'password-hint'}
+              className={`w-full px-4 py-2.5 rounded-xl bg-surface-container border text-sm text-on-surface pr-10 transition-all focus:outline-none ${
+                errors.password ? 'border-error focus:border-error' : 'border-outline-variant/40 focus:border-primary-container focus:ring-1 focus:ring-primary-container'
+              }`}
+              placeholder="••••••••"
+              aria-describedby={errors.password ? 'password-error' : undefined}
               aria-invalid={!!errors.password}
               {...register('password')}
             />
             <button
               type="button"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
               onClick={() => setShowPassword((v) => !v)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
-              {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+              <span className="material-symbols-outlined text-lg">
+                {showPassword ? 'visibility_off' : 'visibility'}
+              </span>
             </button>
           </div>
-          {errors.password
-            ? <p id="password-error" className="error-message" role="alert">{errors.password.message}</p>
-            : <p id="password-hint" className="mt-1 text-xs text-gray-500">At least 8 characters with a letter and number</p>}
+          {errors.password && (
+            <p id="password-error" className="text-xs text-error mt-1" role="alert">{errors.password.message}</p>
+          )}
         </div>
 
         <div>
-          <label htmlFor="confirm_password" className="label">Confirm password</label>
+          <label htmlFor="confirm_password" className="block text-xs font-label-sm text-on-surface-variant uppercase tracking-wider mb-1.5">
+            Confirm Password
+          </label>
           <input
             id="confirm_password"
-            type={showPassword ? 'text' : 'password'}
+            type="password"
             autoComplete="new-password"
-            className={`input ${errors.confirm_password ? 'input-error' : ''}`}
+            className={`w-full px-4 py-2.5 rounded-xl bg-surface-container border text-sm text-on-surface transition-all focus:outline-none ${
+              errors.confirm_password ? 'border-error focus:border-error' : 'border-outline-variant/40 focus:border-primary-container focus:ring-1 focus:ring-primary-container'
+            }`}
             placeholder="••••••••"
             aria-describedby={errors.confirm_password ? 'confirm-error' : undefined}
             aria-invalid={!!errors.confirm_password}
             {...register('confirm_password')}
           />
-          {errors.confirm_password && <p id="confirm-error" className="error-message" role="alert">{errors.confirm_password.message}</p>}
+          {errors.confirm_password && (
+            <p id="confirm-error" className="text-xs text-error mt-1" role="alert">{errors.confirm_password.message}</p>
+          )}
         </div>
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="btn-primary w-full btn-lg mt-2"
+          className="w-full py-3 px-4 rounded-xl bg-primary-container hover:bg-[#38f4ff] text-on-primary-container font-extrabold text-sm tracking-wide transition shadow-[0_0_20px_rgba(0,240,255,0.35)] flex items-center justify-center gap-2 disabled:opacity-60"
           aria-busy={isSubmitting}
         >
-          {isSubmitting ? <LoadingSpinner size="sm" /> : <UserPlus className="h-4 w-4" aria-hidden="true" />}
-          {isSubmitting ? 'Creating account...' : 'Create account'}
+          {isSubmitting ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <>
+              <span className="material-symbols-outlined text-base">person_add</span>
+              <span>Initialize Bio-Profile</span>
+            </>
+          )}
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-gray-400">
-        Already have an account?{' '}
-        <Link to="/login" className="text-primary-400 hover:text-primary-300 font-medium underline-offset-4 hover:underline">
-          Sign in
+      <p className="mt-6 text-center text-xs text-on-surface-variant">
+        Already registered?{' '}
+        <Link to="/login" className="text-primary hover:underline font-semibold">
+          Authenticate Session
         </Link>
       </p>
     </div>
