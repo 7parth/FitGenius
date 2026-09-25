@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Users, Dumbbell, Activity, Clock, TrendingUp, Shield } from 'lucide-react'
+import { Users, Dumbbell, Activity, Clock, TrendingUp, Shield, Brain, CheckCircle2, AlertCircle } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { cn } from '@/lib/utils'
@@ -24,6 +24,10 @@ export default function AdminDashboardPage() {
     { to: '/admin/exercises', icon: Dumbbell, label: 'Exercise Library', description: 'Add, edit, or deactivate exercises' },
     { to: '/admin/challenges', icon: TrendingUp, label: 'Challenges', description: 'Create and manage community challenges' },
   ]
+
+  const trainMutation = useMutation({
+    mutationFn: () => api.post('/admin/ml/train').then(r => r.data),
+  })
 
   return (
     <div className="space-y-6">
@@ -51,6 +55,38 @@ export default function AdminDashboardPage() {
           ))}
         </div>
       )}
+
+      {/* ML Model Training */}
+      <div className="card p-5 border-primary-500/20">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="font-semibold text-white flex items-center gap-2 mb-1">
+              <Brain className="w-4 h-4 text-primary-400" aria-hidden="true" /> ML Recommendation Model
+            </h2>
+            <p className="text-sm text-gray-400">
+              Retrain the TruncatedSVD model on current session data. Requires 20+ completed sessions.
+              Once trained, users with 20+ sessions get Stage 3 ML recommendations.
+            </p>
+          </div>
+          <button
+            onClick={() => trainMutation.mutate()}
+            disabled={trainMutation.isPending}
+            className="btn-primary flex items-center gap-2 flex-shrink-0"
+          >
+            <Brain className="w-4 h-4" aria-hidden="true" />
+            {trainMutation.isPending ? 'Training…' : 'Train Model'}
+          </button>
+        </div>
+        {trainMutation.data && (
+          <div className={`mt-4 flex items-start gap-2 text-sm p-3 rounded-xl ${trainMutation.data.success ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`} role="status">
+            {trainMutation.data.success
+              ? <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              : <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+            }
+            <p>{trainMutation.data.message}</p>
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {quickLinks.map(link => (

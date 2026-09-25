@@ -167,3 +167,53 @@ async def delete_challenge(
         raise HTTPException(status_code=404, detail="Challenge not found")
     challenge.is_active = False
     db.commit()
+
+
+# ── ML model training ─────────────────────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+
+class TrainModelResponse(_BaseModel):
+    success: bool
+    message: str
+    interactions_used: int | None = None
+
+
+@router.post("/ml/train", response_model=TrainModelResponse)
+async def train_recommendation_model(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger TruncatedSVD model retraining from the admin panel.
+    Requires at least 20 completed session interactions in the database.
+    """
+    from app.ml.model_trainer import train_and_save
+    from app.models.workout import WorkoutSession as WS, SessionStatus as SS
+
+    interaction_count = (
+        db.query(WS)
+        .filter(WS.status == SS.completed)
+        .count()
+    )
+
+    if interaction_count < 20:
+        return TrainModelResponse(
+            success=False,
+            message=f"Not enough data: {interaction_count} sessions, need at least 20.",
+            interactions_used=interaction_count,
+        )
+
+    success = train_and_save(db)
+    if success:
+        return TrainModelResponse(
+            success=True,
+            message="Model trained and saved successfully. New recommendations will use ML stage.",
+            interactions_used=interaction_count,
+        )
+    else:
+        return TrainModelResponse(
+            success=False,
+            message="Training failed — check server logs for details.",
+            interactions_used=interaction_count,
+        )

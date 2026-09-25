@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="100" fill="#6366f1"/>
+  <rect x="48" y="48" width="416" height="416" rx="72" fill="#4f46e5"/>
+  <path d="M120 256 L200 160 L288 288 L340 224 L392 256" stroke="white" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="392" cy="160" r="28" fill="#a5b4fc"/>
+  <text x="256" y="430" font-family="system-ui,sans-serif" font-size="52" font-weight="700" fill="white" text-anchor="middle" opacity="0.9">FitGenius</text>
+</svg>

@@ -10,6 +10,8 @@ import os
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+os.environ.setdefault("RATE_LIMIT_REGISTER", "1000/minute")
+os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("OPENAI_API_KEY", "")
@@ -19,6 +21,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.dialects.postgresql import JSONB as _JSONB
+from sqlalchemy import JSON as _JSON
+
+# Map PostgreSQL JSONB → JSON for SQLite test database
+_JSONB.__class_getitem__ = classmethod(lambda cls, item: cls)  # type: ignore
+try:
+    from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+    def _visit_JSONB(self, type_, **kw):  # noqa: N802
+        return self.visit_JSON(type_, **kw)
+
+    SQLiteTypeCompiler.visit_JSONB = _visit_JSONB  # type: ignore[attr-defined]
+except Exception:
+    pass
 
 from app.models.base import Base
 from app.core.database import get_db
@@ -45,11 +61,12 @@ def set_sqlite_pragma(dbapi_conn, connection_record):
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="function", autouse=True)
 def create_tables():
     """Create all tables once for the entire test session."""
     # Import all models to ensure metadata is populated
     import app.models  # noqa: F401
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
@@ -86,14 +103,18 @@ def client(db):
 
 @pytest.fixture()
 def registered_user(client):
-    """Register a user and return the response JSON."""
+    """Register a user and return the response JSON. Uses unique email to avoid collisions."""
+    import uuid as _uuid
+    unique_email = f"test-{_uuid.uuid4().hex[:8]}@fitgenius.com"
     resp = client.post("/api/auth/register", json={
-        "email": "test@fitgenius.com",
+        "email": unique_email,
         "password": "TestPass1",
         "display_name": "Test User",
     })
     assert resp.status_code == 201, resp.text
-    return resp.json()
+    data = resp.json()
+    data["_email"] = unique_email  # stash for login tests
+    return data
 
 
 @pytest.fixture()

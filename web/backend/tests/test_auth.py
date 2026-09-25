@@ -76,7 +76,7 @@ class TestRegister:
 class TestLogin:
     def test_login_success(self, client, registered_user):
         resp = client.post("/api/auth/login", json={
-            "email": "test@fitgenius.com",
+            "email": registered_user["_email"],
             "password": "TestPass1",
         })
         assert resp.status_code == 200
@@ -86,7 +86,7 @@ class TestLogin:
 
     def test_login_wrong_password(self, client, registered_user):
         resp = client.post("/api/auth/login", json={
-            "email": "test@fitgenius.com",
+            "email": registered_user["_email"],
             "password": "WrongPassword1",
         })
         assert resp.status_code == 401
@@ -100,7 +100,7 @@ class TestLogin:
 
     def test_login_email_case_insensitive(self, client, registered_user):
         resp = client.post("/api/auth/login", json={
-            "email": "TEST@FITGENIUS.COM",
+            "email": registered_user["_email"].upper(),
             "password": "TestPass1",
         })
         assert resp.status_code == 200
@@ -109,11 +109,11 @@ class TestLogin:
 # ── /me ───────────────────────────────────────────────────────────────────────
 
 class TestMe:
-    def test_get_me_authenticated(self, client, auth_headers):
+    def test_get_me_authenticated(self, client, auth_headers, registered_user):
         resp = client.get("/api/auth/me", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["email"] == "test@fitgenius.com"
+        assert data["email"] == registered_user["_email"]
         assert data["display_name"] == "Test User"
         assert data["role"] == "user"
         assert data["is_active"] is True

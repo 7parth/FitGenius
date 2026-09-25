@@ -74,7 +74,11 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_tokens(body: RefreshRequest, db: Session = Depends(get_db)):
-    payload = decode_token(body.refresh_token)
+    from jose import JWTError
+    try:
+        payload = decode_token(body.refresh_token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 

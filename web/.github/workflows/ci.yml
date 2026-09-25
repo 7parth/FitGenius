@@ -52,6 +52,8 @@ jobs:
       ENVIRONMENT: test
       DEBUG: "false"
       OPENAI_API_KEY: ""
+      RATE_LIMIT_REGISTER: "1000/minute"
+      RATE_LIMIT_LOGIN: "1000/minute"
 
     steps:
       - uses: actions/checkout@v4
