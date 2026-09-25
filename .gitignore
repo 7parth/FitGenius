@@ -1,0 +1,44 @@
+# ── Internal docs (never commit) ─────────────────────────────────────────────
+Context/
+Prompts/
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+web/.env
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage*
+
+# ── ML models (large binary) ──────────────────────────────────────────────────
+web/backend/models/*.pkl
+web/backend/models/*.joblib
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+web/frontend/node_modules/
+web/frontend/dist/
+web/frontend/.vite/
+*.tsbuildinfo
+
+# ── Expo / React Native ───────────────────────────────────────────────────────
+fitgenius/node_modules/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp

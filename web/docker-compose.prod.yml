@@ -1,0 +1,40 @@
+version: "3.9"
+
+# Production overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  db:
+    restart: always
+    ports: []  # Don't expose DB port in production
+
+  redis:
+    restart: always
+    ports: []  # Don't expose Redis port in production
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: always
+    volumes:
+      - ml_models:/app/models  # Persist ML models only; no source mount
+    ports:
+      - "8000:8000"
+    environment:
+      DEBUG: "false"
+      ENVIRONMENT: production
+    command: >
+      sh -c "alembic upgrade head &&
+             gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
+             --bind 0.0.0.0:8000 --timeout 120 --access-logfile -"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: always
+    volumes: []  # No source mount in production — static build only
+    ports:
+      - "80:80"
+      - "443:443"
