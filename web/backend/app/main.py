@@ -20,6 +20,7 @@ from app.api import (
     pose,
     wearables,
     notifications,
+    nutrition,
     admin,
 )
 
@@ -115,6 +116,7 @@ app.include_router(coach.router,           prefix="/api/coach",           tags=[
 app.include_router(pose.router,            prefix="/api/pose",            tags=["Pose"])
 app.include_router(wearables.router,       prefix="/api/wearables",       tags=["Wearables"])
 app.include_router(notifications.router,   prefix="/api/notifications",   tags=["Notifications"])
+app.include_router(nutrition.router,       prefix="/api/nutrition",       tags=["Nutrition"])
 app.include_router(admin.router,           prefix="/api/admin",           tags=["Admin"])
 
 

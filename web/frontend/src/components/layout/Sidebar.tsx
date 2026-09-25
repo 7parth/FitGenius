@@ -2,8 +2,9 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Activity, LayoutDashboard, Dumbbell, Brain, TrendingUp,
   Trophy, Swords, Users, Settings, LogOut, ChevronRight,
-  Zap, Camera, Watch, Shield, ListOrdered
+  Zap, Camera, Watch, Shield, ListOrdered, Utensils
 } from 'lucide-react'
+
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import api from '@/lib/api'
@@ -23,6 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/workout/recommend', icon: Dumbbell, label: 'Workout' },
+  { to: '/nutrition', icon: Utensils, label: 'Nutrition' },
   { to: '/exercises', icon: ListOrdered, label: 'Exercises' },
   { to: '/workout/pose', icon: Camera, label: 'Form Analysis' },
   { to: '/coach', icon: Brain, label: 'AI Coach' },

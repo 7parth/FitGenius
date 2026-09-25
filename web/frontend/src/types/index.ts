@@ -402,3 +402,59 @@ export interface ApiError {
   detail: string
   status_code?: number
 }
+
+// ─── Nutrition ────────────────────────────────────────────────────────────────
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack'
+export type DietaryPreference = 'anything' | 'vegetarian' | 'vegan' | 'keto' | 'paleo' | 'high_protein'
+
+export interface NutritionGoal {
+  id: string
+  user_id: string
+  target_calories: number
+  target_protein_g: number
+  target_carbs_g: number
+  target_fat_g: number
+  dietary_preference: DietaryPreference
+}
+
+export interface MealLog {
+  id: string
+  user_id: string
+  log_date: string
+  meal_type: MealType
+  name: string
+  calories: number
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+  created_at: string
+}
+
+export interface DailyNutritionSummary {
+  log_date: string
+  total_calories: number
+  total_protein_g: number
+  total_carbs_g: number
+  total_fat_g: number
+  goal: NutritionGoal
+  logs: MealLog[]
+}
+
+export interface MealIdea {
+  title: string
+  description: string
+  meal_type: MealType
+  calories: number
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+  prep_time_minutes: number
+  ingredients: string[]
+  dietary_tags: string[]
+}
+
+export interface MealRecommendationResponse {
+  recommendations: MealIdea[]
+  rationale: string
+}
+

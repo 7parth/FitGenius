@@ -31,3 +31,6 @@ class User(Base, UUIDMixin, TimestampMixin):
     achievements: Mapped[list["UserAchievement"]] = relationship("UserAchievement", back_populates="user")  # noqa
     conversations: Mapped[list["AIConversation"]] = relationship("AIConversation", back_populates="user")  # noqa
     notifications: Mapped[list["Notification"]] = relationship("Notification", back_populates="user")  # noqa
+    nutrition_goal: Mapped["UserNutritionGoal"] = relationship("UserNutritionGoal", back_populates="user", uselist=False, cascade="all, delete-orphan")  # noqa
+    nutrition_logs: Mapped[list["NutritionLog"]] = relationship("NutritionLog", back_populates="user", cascade="all, delete-orphan")  # noqa
+

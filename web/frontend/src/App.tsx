@@ -24,6 +24,7 @@ const LeaderboardPage = lazy(() => import('@/pages/gamification/LeaderboardPage'
 const ChallengesPage = lazy(() => import('@/pages/gamification/ChallengesPage'))
 const AccessibilitySettingsPage = lazy(() => import('@/pages/settings/AccessibilitySettingsPage'))
 const ProfilePage = lazy(() => import('@/pages/settings/ProfilePage'))
+const NutritionPage = lazy(() => import('@/pages/nutrition/NutritionPage'))
 const WearablePage = lazy(() => import('@/pages/wearables/WearablePage'))
 const AdminDashboardPage = lazy(() => import('@/pages/admin/AdminDashboardPage'))
 const UsersAdminPage = lazy(() => import('@/pages/admin/UsersPage'))
@@ -90,6 +91,7 @@ export default function App() {
             {/* Main app routes */}
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/nutrition" element={<NutritionPage />} />
               <Route path="/exercises" element={<ExercisesPage />} />
               <Route path="/exercises/:id" element={<ExerciseDetailPage />} />
               <Route path="/workout/recommend" element={<RecommendationPage />} />

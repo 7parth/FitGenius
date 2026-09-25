@@ -119,5 +119,21 @@ export const exportUserData = async () => {
   window.URL.revokeObjectURL(url)
 }
 
+export const nutritionApi = {
+  getTodaySummary: (date?: string) =>
+    api.get(`/nutrition/today${date ? `?target_date=${date}` : ''}`).then((r) => r.data),
+  logMeal: (data: { name: string; meal_type: string; calories: number; protein_g: number; carbs_g: number; fat_g: number; log_date?: string }) =>
+    api.post('/nutrition/log', data).then((r) => r.data),
+  deleteLog: (id: string) =>
+    api.delete(`/nutrition/log/${id}`).then((r) => r.data),
+  getGoals: () =>
+    api.get('/nutrition/goals').then((r) => r.data),
+  updateGoals: (data: { target_calories?: number; target_protein_g?: number; target_carbs_g?: number; target_fat_g?: number; dietary_preference?: string }) =>
+    api.put('/nutrition/goals', data).then((r) => r.data),
+  getAiRecommendations: (target_meal = 'lunch', max_calories = 600) =>
+    api.post('/nutrition/ai-recommend', { target_meal, max_calories }).then((r) => r.data),
+}
+
 export default api
+
 

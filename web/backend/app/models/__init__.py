@@ -35,3 +35,5 @@ from .wearable import WearableData, WearableSource, FatigueLevel  # noqa: F401
 from .conversation import AIConversation  # noqa: F401
 from .notification import Notification, NotificationType  # noqa: F401
 from .audit import AuditLog, AuditAction  # noqa: F401
+from .nutrition import NutritionLog, UserNutritionGoal, MealType, DietaryPreference  # noqa: F401
+
