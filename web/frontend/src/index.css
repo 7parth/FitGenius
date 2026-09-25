@@ -16,13 +16,13 @@
 }
 
 .dark {
-  --bg-primary: #0f0f1a;
-  --bg-secondary: #16161e;
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --accent: #818cf8;
-  --accent-fg: #0f0f1a;
-  --border: #2d2d3d;
+  --bg-primary: #0f131c;
+  --bg-secondary: #181c24;
+  --text-primary: #dfe2ee;
+  --text-secondary: #b9cacb;
+  --accent: #00f0ff;
+  --accent-fg: #00363a;
+  --border: #262a33;
 }
 
 /* High contrast theme */
