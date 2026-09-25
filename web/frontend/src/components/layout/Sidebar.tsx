@@ -9,6 +9,8 @@ import { useAuthStore } from '@/store/authStore'
 import api from '@/lib/api'
 import { toast } from '@/components/ui/Toast'
 
+import { NotificationBell } from './NotificationBell'
+
 interface NavItem {
   to: string
   icon: React.ElementType
@@ -55,12 +57,15 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   return (
     <nav className="flex flex-col h-full bg-surface-900 border-r border-gray-800" aria-label="Main navigation">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-800">
-        <div className="rounded-xl bg-primary-500 p-2 flex-shrink-0">
-          <Activity className="h-5 w-5 text-white" aria-hidden="true" />
+      {/* Logo & Notification Bell */}
+      <div className="flex items-center justify-between px-6 py-5 border-b border-gray-800">
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-primary-500 p-2 flex-shrink-0">
+            <Activity className="h-5 w-5 text-white" aria-hidden="true" />
+          </div>
+          <span className="text-lg font-bold text-white">FitGenius</span>
         </div>
-        <span className="text-lg font-bold text-white">FitGenius</span>
+        <NotificationBell />
       </div>
 
       {/* Nav items */}

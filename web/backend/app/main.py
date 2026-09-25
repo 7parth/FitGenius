@@ -19,8 +19,10 @@ from app.api import (
     coach,
     pose,
     wearables,
+    notifications,
     admin,
 )
+
 
 logger = logging.getLogger("fitgenius")
 
@@ -112,6 +114,7 @@ app.include_router(progress.router,        prefix="/api/progress",        tags=[
 app.include_router(coach.router,           prefix="/api/coach",           tags=["Coach"])
 app.include_router(pose.router,            prefix="/api/pose",            tags=["Pose"])
 app.include_router(wearables.router,       prefix="/api/wearables",       tags=["Wearables"])
+app.include_router(notifications.router,   prefix="/api/notifications",   tags=["Notifications"])
 app.include_router(admin.router,           prefix="/api/admin",           tags=["Admin"])
 
 

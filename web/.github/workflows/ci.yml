@@ -81,13 +81,13 @@ jobs:
         working-directory: web/backend
         run: python -m py_compile app/main.py
 
-      - name: Run Alembic migrations
+      - name: Run Alembic migrations (001 + 002)
         working-directory: web/backend
         run: alembic upgrade head
 
-      - name: Run tests
+      - name: Run tests (including RBAC + ML recommendation tests)
         working-directory: web/backend
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short -x
 
   # ── Frontend ─────────────────────────────────────────────────────────────────
   frontend:
@@ -117,6 +117,55 @@ jobs:
         run: npm run build
         env:
           VITE_API_BASE_URL: http://localhost:8000
+
+  # ── E2E tests (Playwright, public pages only) ────────────────────────────────
+  e2e:
+    name: E2E — Playwright smoke tests
+    runs-on: ubuntu-latest
+    needs: [frontend]
+    # Run on PRs to main and pushes to develop (public-page tests, no backend needed)
+    if: |
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/develop')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web/frontend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: web/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E (public page subset)
+        working-directory: web/frontend
+        run: >
+          npx playwright test
+          e2e/auth.spec.ts
+          e2e/accessibility.spec.ts
+          e2e/pwa.spec.ts
+          --project=chromium
+          --reporter=list
+          --grep "login page|register page|skip link|404|robots|favicon|manifest|load within|viewport|images missing"
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/frontend/playwright-report/
+          retention-days: 7
 
   # ── Docker build smoke test ───────────────────────────────────────────────
   docker:

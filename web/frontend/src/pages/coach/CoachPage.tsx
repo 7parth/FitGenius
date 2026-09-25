@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Send, Bot, User, Plus, Trash2 } from 'lucide-react'
+import { Send, Bot, User, Plus, Trash2, Settings2 } from 'lucide-react'
+import { VoiceButton } from '@/components/ui/VoiceButton'
+import { useVoice } from '@/hooks/useVoice'
 import { api, getErrorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
@@ -17,7 +19,15 @@ export default function CoachPage() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const { isListening, isSupported, isSpeaking, transcript, interimTranscript,
+    toggleListening, speak, cancelSpeech } = useVoice({
+    onResult: (text, isFinal) => {
+      if (isFinal) setInput(prev => prev + text)
+    },
+  })
 
   const { data: conversations = [] } = useQuery({
     queryKey: ['conversations'],
@@ -33,6 +43,13 @@ export default function CoachPage() {
   useEffect(() => {
     if (convDetail?.messages) setMessages(convDetail.messages)
   }, [convDetail])
+
+  // Auto-send when voice transcript is finalised and listening stops
+  useEffect(() => {
+    if (!isListening && transcript && voiceEnabled) {
+      setInput(transcript)
+    }
+  }, [isListening, transcript, voiceEnabled])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -51,6 +68,8 @@ export default function CoachPage() {
       setMessages(prev => [...prev, assistantMsg])
       if (!activeConvId) setActiveConvId(data.conversation_id)
       qc.invalidateQueries({ queryKey: ['conversations'] })
+      // Speak the reply if voice mode is active
+      if (voiceEnabled) speak(data.reply, { rate: 1.0 })
     },
     onError: () => {
       setMessages(prev => [...prev, {
@@ -206,16 +225,31 @@ export default function CoachPage() {
         {/* Input */}
         <div className="border-t border-surface-700 p-4">
           <div className="flex gap-2 items-end">
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask your AI coach…"
-              rows={1}
-              className="input flex-1 resize-none min-h-[42px] max-h-32 overflow-y-auto"
-              aria-label="Message to AI coach"
-              disabled={sendMutation.isPending}
-            />
+            <div className="flex-1 relative">
+              <textarea
+                value={input + (isListening ? interimTranscript : '')}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={isListening ? 'Listening…' : 'Ask your AI coach…'}
+                rows={1}
+                className="input w-full resize-none min-h-[42px] max-h-32 overflow-y-auto pr-10"
+                aria-label="Message to AI coach"
+                disabled={sendMutation.isPending || isListening}
+              />
+              {isListening && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+              )}
+            </div>
+            {isSupported && (
+              <VoiceButton
+                isListening={isListening}
+                isSupported={isSupported}
+                isSpeaking={isSpeaking}
+                onToggle={() => { setVoiceEnabled(true); toggleListening() }}
+                onCancelSpeech={cancelSpeech}
+                aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+              />
+            )}
             <button
               onClick={handleSend}
               disabled={!input.trim() || sendMutation.isPending}
@@ -225,9 +259,19 @@ export default function CoachPage() {
               <Send className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
-          <p className="text-xs text-gray-600 mt-2">
-            AI responses are for general guidance only — not medical advice.
-          </p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-gray-600">AI responses are for general guidance only — not medical advice.</p>
+            {isSupported && (
+              <button
+                onClick={() => setVoiceEnabled(v => !v)}
+                className={cn('text-xs flex items-center gap-1 transition-colors', voiceEnabled ? 'text-primary-400' : 'text-gray-600 hover:text-gray-400')}
+                aria-pressed={voiceEnabled}
+              >
+                <Settings2 className="w-3 h-3" aria-hidden="true" />
+                {voiceEnabled ? 'Voice replies on' : 'Voice replies off'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

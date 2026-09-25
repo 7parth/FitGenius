@@ -94,4 +94,30 @@ export const getErrorMessage = (error: unknown): string => {
   return 'An unexpected error occurred'
 }
 
+export const notificationsApi = {
+  getNotifications: (unreadOnly = false, page = 1) =>
+    api.get(`/notifications?unread_only=${unreadOnly}&page=${page}`).then((r) => r.data),
+  getUnreadCount: () =>
+    api.get<{ unread_count: number }>('/notifications/unread-count').then((r) => r.data),
+  markAsRead: (id: string) =>
+    api.patch(`/notifications/${id}/read`).then((r) => r.data),
+  markAllAsRead: () =>
+    api.post('/notifications/read-all').then((r) => r.data),
+  deleteNotification: (id: string) =>
+    api.delete(`/notifications/${id}`).then((r) => r.data),
+}
+
+export const exportUserData = async () => {
+  const response = await api.get('/profile/export', { responseType: 'blob' })
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', 'fitgenius_user_data.json')
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 export default api
+

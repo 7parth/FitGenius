@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { useAuthStore } from '@/store/authStore'
-import { api, getErrorMessage } from '@/lib/api'
-import { User, Save, Target, MapPin } from 'lucide-react'
+import { api, getErrorMessage, exportUserData } from '@/lib/api'
+import { User, Save, Target, MapPin, Download } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { cn } from '@/lib/utils'
 
@@ -132,6 +132,23 @@ export default function ProfilePage() {
           {fitnessMutation.isSuccess && <p className="text-xs text-emerald-400 mt-2" role="status">Saved!</p>}
           {fitnessMutation.isError && <p className="text-xs text-red-400 mt-2" role="alert">{getErrorMessage(fitnessMutation.error)}</p>}
         </form>
+      </section>
+
+      {/* Privacy & Data Export (GDPR) */}
+      <section className="card p-6 space-y-4" aria-labelledby="privacy-heading">
+        <h2 id="privacy-heading" className="font-semibold text-white flex items-center gap-2">
+          <Download className="w-4 h-4 text-primary-400" aria-hidden="true" /> Privacy & Personal Data
+        </h2>
+        <p className="text-xs text-gray-400 leading-relaxed">
+          Download a complete machine-readable JSON archive of your account profile, workout history, wearable metrics, and accessibility preferences in compliance with GDPR privacy regulations.
+        </p>
+        <button
+          type="button"
+          onClick={() => exportUserData()}
+          className="btn-secondary flex items-center gap-2 text-sm"
+        >
+          <Download className="w-4 h-4" aria-hidden="true" /> Export My Data (JSON)
+        </button>
       </section>
     </div>
   )

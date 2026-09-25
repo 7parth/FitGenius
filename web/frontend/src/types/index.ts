@@ -249,6 +249,37 @@ export interface Challenge {
   user_joined?: boolean
 }
 
+// ─── Notifications ────────────────────────────────────────────────────────────
+export type NotificationType =
+  | 'achievement_unlocked'
+  | 'challenge_joined'
+  | 'challenge_completed'
+  | 'streak_milestone'
+  | 'workout_reminder'
+  | 'recommendation_ready'
+  | 'system'
+
+export interface AppNotification {
+  id: string
+  user_id: string
+  notification_type: NotificationType
+  title: string
+  body: string
+  is_read: boolean
+  payload: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface NotificationListResponse {
+  items: AppNotification[]
+  total: number
+  unread_count: number
+  page: number
+  page_size: number
+}
+
+
 // ─── Progress ─────────────────────────────────────────────────────────────────
 export interface ProgressSummary {
   total_workouts: number

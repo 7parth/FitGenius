@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Menu, X, LayoutDashboard, Dumbbell, Brain, TrendingUp, Trophy } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { ToastContainer } from '@/components/ui/Toast'
+import { NotificationBell } from './NotificationBell'
 import { cn } from '@/lib/utils'
 
 const bottomNavItems = [
@@ -47,7 +48,7 @@ export function AppLayout() {
             {sidebarOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
           </button>
           <span className="text-base font-semibold text-white">FitGenius</span>
-          <div className="w-9" aria-hidden="true" /> {/* spacer */}
+          <NotificationBell />
         </header>
 
         {/* Page content */}
