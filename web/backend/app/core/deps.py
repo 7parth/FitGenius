@@ -29,10 +29,13 @@ def get_current_user(
     except JWTError:
         raise credentials_exc
 
-    # Check token blacklist
-    redis = get_redis()
-    if redis.exists(f"blacklist:{token}"):
-        raise credentials_exc
+    # Check token blacklist — skip gracefully if Redis is unavailable
+    try:
+        redis = get_redis()
+        if redis and redis.exists(f"blacklist:{token}"):
+            raise credentials_exc
+    except Exception:
+        pass  # Redis down: allow request through, blacklist unavailable
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:

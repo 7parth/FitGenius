@@ -14,8 +14,8 @@ alembic==1.13.3
 psycopg2-binary==2.9.9
 
 # Auth & security
+bcrypt==5.0.0
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
 
 # Cache & rate limiting
 redis==5.1.0

@@ -1,18 +1,27 @@
+import hashlib
+import base64
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
+from jose import jwt
 from .config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _prehash(password: str) -> bytes:
+    """
+    SHA-256 hash → base64 encode before bcrypt.
+    Safely handles passwords longer than bcrypt's 72-byte limit.
+    """
+    digest = hashlib.sha256(password.encode("utf-8")).digest()
+    return base64.b64encode(digest)
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_prehash(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(_prehash(plain), hashed.encode("utf-8"))
 
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
@@ -32,7 +41,7 @@ def create_refresh_token(data: dict[str, Any]) -> str:
 
 
 def decode_token(token: str) -> dict[str, Any]:
-    """Decode and verify a JWT token. Raises JWTError on failure."""
+    """Decode and verify a JWT token. Returns payload or raises JWTError."""
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
 
