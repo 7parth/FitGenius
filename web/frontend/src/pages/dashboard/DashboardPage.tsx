@@ -1,585 +1,159 @@
-import React from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { api, nutritionApi } from '@/lib/api'
 
+type Recommendation = {
+  id: string
+  stage: string
+  confidence_score: number
+  payload: {
+    exercises?: Array<{ exercise_id: string; name: string; sets: number; reps?: number; duration_seconds?: number; supports_pose_analysis?: boolean }>
+    rationale?: string
+    estimated_duration_minutes?: number
+    adjustments?: { fatigue_level?: string }
+  }
+}
+
+type DailyPoint = { date: string; value: number }
+
+const percent = (amount: number, target: number) => target > 0 ? Math.min(100, Math.round(amount / target * 100)) : 0
+const display = (value?: number | null, suffix = '') => value == null ? '—' : `${value}${suffix}`
+
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { user } = useAuthStore()
-
-  // Dynamic user data queries
-  const { data: summary } = useQuery({
+  const summary = useQuery({
     queryKey: ['progress-summary'],
-    queryFn: () => api.get('/progress/summary').then((r) => r.data).catch(() => null),
+    queryFn: () => api.get('/progress/summary').then(response => response.data),
   })
-
-  const { data: recData } = useQuery({
+  const recommendation = useQuery<Recommendation | null>({
     queryKey: ['recommendation-latest'],
-    queryFn: () => api.get('/recommendations/latest').then((r) => r.data).catch(() => null),
+    queryFn: () => api.get('/recommendations/latest').then(response => response.data).catch(error => {
+      if (error?.response?.status === 404) return null
+      throw error
+    }),
+  })
+  const nutrition = useQuery({ queryKey: ['nutrition-today'], queryFn: () => nutritionApi.getTodaySummary() })
+  const gamification = useQuery({ queryKey: ['gamification-summary'], queryFn: () => api.get('/gamification/summary').then(response => response.data) })
+  const wearable = useQuery({ queryKey: ['wearable-data', 'dashboard'], queryFn: () => api.get('/wearables/data?page=1&page_size=1').then(response => response.data[0] ?? null) })
+  const fatigue = useQuery({ queryKey: ['wearable-fatigue'], queryFn: () => api.get('/wearables/fatigue').then(response => response.data) })
+  const weeklyHistory = useQuery({
+    queryKey: ['dashboard-weekly-history'],
+    queryFn: () => api.get('/progress/history?metric=duration&period=7d').then(response => response.data.data as DailyPoint[]),
   })
 
-  const { data: nutrition } = useQuery({
-    queryKey: ['nutrition-today'],
-    queryFn: () => nutritionApi.getTodaySummary().catch(() => null),
+  const generateRecommendation = useMutation({
+    mutationFn: () => api.post('/recommendations/generate', { context_override: null }).then(response => response.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recommendation-latest'] }),
   })
 
-  const todayDateStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  })
+  const days = useMemo(() => {
+    const data = new Map((weeklyHistory.data ?? []).map(point => [point.date, point.value]))
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date()
+      date.setUTCHours(0, 0, 0, 0)
+      date.setUTCDate(date.getUTCDate() - (6 - index))
+      const key = date.toISOString().slice(0, 10)
+      return { key, label: date.toLocaleDateString(undefined, { weekday: 'short' }), minutes: data.get(key) ?? 0, today: index === 6 }
+    })
+  }, [weeklyHistory.data])
+  const weeklyMinutes = days.reduce((total, day) => total + day.minutes, 0)
+  const maxDay = Math.max(60, ...days.map(day => day.minutes))
+  const plan = recommendation.data?.payload
+  const exercises = plan?.exercises ?? []
+  const calorieGoal = nutrition.data?.goal?.target_calories ?? 0
+  const calories = nutrition.data?.total_calories ?? 0
+  const macros = [
+    { name: 'Protein', current: nutrition.data?.total_protein_g ?? 0, target: nutrition.data?.goal?.target_protein_g ?? 0, color: 'bg-primary-container', text: 'text-primary-container' },
+    { name: 'Carbohydrates', current: nutrition.data?.total_carbs_g ?? 0, target: nutrition.data?.goal?.target_carbs_g ?? 0, color: 'bg-secondary', text: 'text-secondary' },
+    { name: 'Fats', current: nutrition.data?.total_fat_g ?? 0, target: nutrition.data?.goal?.target_fat_g ?? 0, color: 'bg-tertiary-fixed-dim', text: 'text-tertiary-fixed-dim' },
+  ]
+  const loading = summary.isLoading || nutrition.isLoading || gamification.isLoading
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 
-  return (
-    <div className="flex flex-col w-full pb-16 px-4 lg:px-8 pt-6 max-w-7xl mx-auto">
-      {/* Top Greeting & Header Bar */}
-      <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-8">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-3">
-            <span className="px-2.5 py-0.5 rounded-full bg-surface-container-high text-primary font-code-stat text-code-stat uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse"></span>
-              Bio-OS v4.2 Online
-            </span>
-            <span className="font-body-sm text-body-sm text-on-surface-variant flex items-center gap-1">
-              <span className="material-symbols-outlined text-sm text-secondary">cloud_done</span>
-              {todayDateStr} • Telemetry Synced
-            </span>
-          </div>
-          <h1 className="font-display-lg text-display-lg text-on-surface tracking-tight flex items-center gap-3">
-            Welcome back, {user?.display_name || 'Alex'}! <span className="text-primary-container">⚡</span>
-          </h1>
-          <p className="font-body-md text-body-md text-on-surface-variant max-w-xl">
-            Central neural engine recalibrated with your overnight biometric telemetry. Peak metabolic window active until 14:30.
-          </p>
-        </div>
-
-        {/* Quick Vital Badges & CTA */}
-        <div className="flex items-center flex-wrap gap-3">
-          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-surface-container-low shadow-sm border border-surface-container-high/40">
-            <div className="w-9 h-9 rounded-lg bg-secondary-container/20 flex items-center justify-center text-secondary">
-              <span className="material-symbols-outlined text-lg">ecg_heart</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">HRV Baseline</span>
-              <span className="font-stat-xl text-headline-sm text-secondary font-bold leading-none">
-                68 ms <span className="font-label-sm text-label-sm text-secondary font-normal uppercase">• Optimal</span>
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-surface-container-low shadow-sm border border-surface-container-high/40">
-            <div className="w-9 h-9 rounded-lg bg-primary-container/10 flex items-center justify-center text-primary-container">
-              <span className="material-symbols-outlined text-lg">bolt</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Neural Load</span>
-              <span className="font-stat-xl text-headline-sm text-primary font-bold leading-none">Low Strain</span>
-            </div>
-          </div>
-
-          <button
-            onClick={() => navigate('/workout/recommend')}
-            className="group flex items-center gap-2.5 px-6 py-3 rounded-xl bg-primary-container text-on-primary-container font-label-md text-label-md font-bold shadow-[0_0_24px_rgba(0,240,255,0.35)] hover:shadow-[0_0_36px_rgba(0,240,255,0.6)] transition-all"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-lg font-bold group-hover:rotate-90 transition-transform">add</span>
-            <span>+ Log Workout</span>
-          </button>
-        </div>
-      </section>
-
-      {/* Bento Grid 3 Columns Desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT 2 COLUMNS (8 cols on lg) */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
-          {/* Hero Feature Card: AI Workout Recommendation */}
-          <article className="relative overflow-hidden rounded-xl bg-surface-container-low shadow-xl flex flex-col justify-between border border-surface-container-high/40">
-            {/* Background Ambient Accent Glow */}
-            <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-primary-container/10 blur-3xl pointer-events-none"></div>
-            <div className="absolute -bottom-24 -left-24 w-80 h-80 rounded-full bg-tertiary-container/10 blur-3xl pointer-events-none"></div>
-
-            <div className="p-6 md:p-8 flex flex-col gap-6 relative z-10">
-              {/* Card Header & Status Chips */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="px-3 py-1 rounded-full bg-primary-container/15 text-primary-container font-label-sm text-label-sm uppercase tracking-widest flex items-center gap-1.5 font-bold">
-                    <span className="material-symbols-outlined text-sm">auto_awesome</span>
-                    AI Prescribed Protocol
-                  </span>
-                  <span className="px-3 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm font-medium">
-                    Intermediate Tier
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 font-code-stat text-code-stat text-on-surface-variant">
-                  <span className="material-symbols-outlined text-sm text-primary">sensors</span>
-                  <span>CALIBRATION ID: #AI-HYP-992</span>
-                </div>
-              </div>
-
-              {/* Main Workout Details */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                <div className="md:col-span-7 flex flex-col gap-3">
-                  <span className="font-label-sm text-label-sm text-secondary uppercase tracking-widest font-bold">
-                    Today's Focus • Hypertrophy
-                  </span>
-                  <h2 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">
-                    {recData?.template_name || 'Full-Body Hypertrophy & Core Surge'}
-                  </h2>
-                  <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">
-                    Calibrated for maximum mechanical tension aligned with your <span className="text-secondary font-bold">94% HRV baseline</span>. Prioritizes prime mover strength with high neural recovery buffer.
-                  </p>
-
-                  {/* Quick Workout Telemetry Tokens */}
-                  <div className="flex items-center gap-5 pt-2">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-lg text-primary">timer</span>
-                      <div className="flex flex-col">
-                        <span className="font-stat-xl text-headline-sm text-on-surface font-bold leading-tight">45</span>
-                        <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Minutes</span>
-                      </div>
-                    </div>
-                    <div className="w-px h-8 bg-surface-container-highest"></div>
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-lg text-secondary">local_fire_department</span>
-                      <div className="flex flex-col">
-                        <span className="font-stat-xl text-headline-sm text-on-surface font-bold leading-tight">380</span>
-                        <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Est. kCal</span>
-                      </div>
-                    </div>
-                    <div className="w-px h-8 bg-surface-container-highest"></div>
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-lg text-tertiary-fixed-dim">reorder</span>
-                      <div className="flex flex-col">
-                        <span className="font-stat-xl text-headline-sm text-on-surface font-bold leading-tight">6</span>
-                        <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Key Sets</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Workout Visual Preview Box */}
-                <div className="md:col-span-5 relative group overflow-hidden rounded-xl bg-surface-container shadow-md h-52">
-                  <div
-                    className="w-full h-full bg-cover bg-center transition-transform duration-700 group-hover:scale-105"
-                    style={{
-                      backgroundImage: `url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1470&auto=format&fit=crop')`,
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-surface-container-lowest via-surface-container-lowest/40 to-transparent"></div>
-                  {/* Bottom Overlaid Telemetry Badge */}
-                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between px-3 py-2 rounded-lg bg-surface-container-lowest/80 backdrop-blur-md">
-                    <span className="font-code-stat text-code-stat text-primary flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(78,222,163,0.8)]"></span>
-                      L4 Squat + Barbell Row
-                    </span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant">Live Pose Ready</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Target Muscles Badges & Action CTA */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-surface-container-high/40">
-                <div className="flex items-center flex-wrap gap-2">
-                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mr-1">
-                    Target Prime Movers:
-                  </span>
-                  <span className="px-2.5 py-1 rounded-md bg-surface-container-high text-primary font-label-sm text-label-sm">
-                    Quads
-                  </span>
-                  <span className="px-2.5 py-1 rounded-md bg-surface-container-high text-primary font-label-sm text-label-sm">
-                    Chest
-                  </span>
-                  <span className="px-2.5 py-1 rounded-md bg-surface-container-high text-secondary font-label-sm text-label-sm">
-                    Core Stability
-                  </span>
-                  <span className="px-2.5 py-1 rounded-md bg-surface-container-high text-primary font-label-sm text-label-sm">
-                    Deltoids
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate('/workout/recommend')}
-                  className="group flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl bg-primary-container text-on-primary-container font-label-md text-label-md font-bold shadow-[0_0_24px_rgba(0,240,255,0.35)] hover:shadow-[0_0_36px_rgba(0,240,255,0.6)] transition-all"
-                  type="button"
-                >
-                  <span>Start Workout</span>
-                  <span className="material-symbols-outlined text-lg group-hover:translate-x-1 transition-transform">
-                    arrow_forward
-                  </span>
-                </button>
-              </div>
-            </div>
-          </article>
-
-          {/* Sub-grid: 2 Columns for Weekly Cadence & AI Coach Genesis Insight */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Weekly Cadence & Volume Tracker */}
-            <article className="p-6 rounded-xl bg-surface-container-low shadow-md flex flex-col justify-between gap-5 relative overflow-hidden border border-surface-container-high/40">
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
-                    Weekly Training Volume
-                  </span>
-                  <h3 className="font-headline-sm text-headline-sm text-on-surface">Weekly Cadence</h3>
-                </div>
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary-container/20 text-secondary">
-                  <span className="material-symbols-outlined text-sm">local_fire_department</span>
-                  <span className="font-label-sm text-label-sm font-bold">5 Day Streak! 🔥</span>
-                </div>
-              </div>
-
-              {/* Volume Summary Stats */}
-              <div className="flex items-baseline justify-between pt-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="font-stat-xl text-stat-xl text-primary font-bold">215</span>
-                  <span className="font-body-md text-body-md text-on-surface-variant">/ 300 min target</span>
-                </div>
-                <span className="font-code-stat text-code-stat text-secondary font-bold">71% REACHED</span>
-              </div>
-
-              {/* Volume Progress Bar */}
-              <div className="w-full h-2 rounded-full bg-surface-container-high overflow-hidden">
-                <div
-                  className="h-full bg-primary-container rounded-full shadow-[0_0_12px_rgba(0,240,255,0.8)]"
-                  style={{ width: '71%' }}
-                ></div>
-              </div>
-
-              {/* 7-Day Micro Bar Visualization */}
-              <div className="grid grid-cols-7 gap-2 pt-2 items-end">
-                {/* Mon */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-surface-container-high flex flex-col justify-end p-1">
-                    <div className="w-full bg-primary/40 rounded-md" style={{ height: '65%' }}></div>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">M</span>
-                </div>
-                {/* Tue */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-surface-container-high flex flex-col justify-end p-1">
-                    <div className="w-full bg-primary/50 rounded-md" style={{ height: '75%' }}></div>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">T</span>
-                </div>
-                {/* Wed */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-surface-container-high flex flex-col justify-end p-1">
-                    <div className="w-full bg-secondary/80 rounded-md" style={{ height: '90%' }}></div>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">W</span>
-                </div>
-                {/* Thu (Today) */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-primary-container/20 flex flex-col justify-end p-1 relative shadow-[0_0_12px_rgba(0,240,255,0.2)]">
-                    <div className="w-full bg-primary-container rounded-md" style={{ height: '80%' }}></div>
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-primary-container text-on-primary-container font-label-sm text-[9px] font-bold leading-none">
-                      45m
-                    </span>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-primary-container font-bold">THU</span>
-                </div>
-                {/* Fri */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-surface-container-high flex flex-col justify-end p-1">
-                    <div className="w-full bg-surface-container-highest rounded-md" style={{ height: '0%' }}></div>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">F</span>
-                </div>
-                {/* Sat */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-surface-container-high flex flex-col justify-end p-1">
-                    <div className="w-full bg-surface-container-highest rounded-md" style={{ height: '0%' }}></div>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">S</span>
-                </div>
-                {/* Sun */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-full h-16 rounded-lg bg-surface-container-high flex flex-col justify-end p-1">
-                    <div className="w-full bg-surface-container-highest rounded-md" style={{ height: '0%' }}></div>
-                  </div>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">S</span>
-                </div>
-              </div>
-            </article>
-
-            {/* AI Coach Genesis Active Insight Card */}
-            <article className="p-6 rounded-xl bg-surface-container-low shadow-md flex flex-col justify-between gap-5 relative overflow-hidden border border-surface-container-high/40">
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-md bg-tertiary-container/30 text-tertiary flex items-center justify-center">
-                      <span className="material-symbols-outlined text-sm">psychology</span>
-                    </span>
-                    <span className="font-label-sm text-label-sm text-tertiary-fixed-dim uppercase tracking-wider font-bold">
-                      Coach Genesis • Active Note
-                    </span>
-                  </div>
-                  <span className="w-2 h-2 rounded-full bg-tertiary-fixed-dim shadow-[0_0_8px_rgba(208,188,255,0.8)]"></span>
-                </div>
-
-                <div className="flex flex-col gap-2 pt-1">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-error text-base">warning</span>
-                    <span className="font-label-md text-label-md text-error font-bold">Kinetic Strain Detected</span>
-                  </div>
-                  <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">
-                    Your hamstrings registered mild residual fatigue during yesterday’s deadlifts. AI recommends a targeted 5-minute dynamic flow before heavy squat loads to minimize pelvic tilt risk.
-                  </p>
-                </div>
-              </div>
-
-              {/* Protocol Prompt & Action Button */}
-              <div className="flex flex-col gap-3 pt-2">
-                <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-container">
-                  <span className="font-label-sm text-label-sm text-on-surface-variant">Targeted Mobility</span>
-                  <span className="font-code-stat text-code-stat text-secondary font-bold">+18% Hip Flexion</span>
-                </div>
-                <button
-                  onClick={() => navigate('/coach')}
-                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg bg-tertiary-container/20 text-tertiary hover:bg-tertiary-container/30 transition-colors font-label-md text-label-md font-semibold"
-                  type="button"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base">play_circle</span>
-                    <span>View Warm-up Sequence (5 min)</span>
-                  </span>
-                  <span className="material-symbols-outlined text-base">arrow_forward</span>
-                </button>
-              </div>
-            </article>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN (4 cols on lg) */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
-          {/* Bio-Readiness Widget with Radial Arc Gauge */}
-          <article className="p-6 rounded-xl bg-surface-container-low shadow-md flex flex-col gap-6 relative overflow-hidden border border-surface-container-high/40">
-            <div className="flex items-center justify-between">
-              <div className="flex flex-col">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
-                  Continuous Telemetry
-                </span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface">Bio-Readiness</h3>
-              </div>
-              <span className="px-2.5 py-1 rounded-full bg-secondary-container/20 text-secondary font-label-sm text-label-sm font-bold flex items-center gap-1 shadow-[0_0_12px_rgba(78,222,163,0.2)]">
-                <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
-                Peak Prime
-              </span>
-            </div>
-
-            {/* Radial Gauge & Big Score Display */}
-            <div className="flex flex-col items-center justify-center relative py-2">
-              <div className="relative w-48 h-48 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-                  <circle
-                    className="text-surface-container-highest"
-                    cx="60"
-                    cy="60"
-                    fill="none"
-                    r="50"
-                    stroke="currentColor"
-                    strokeWidth="9"
-                  ></circle>
-                  <circle
-                    className="text-secondary transition-all duration-1000"
-                    cx="60"
-                    cy="60"
-                    fill="none"
-                    r="50"
-                    stroke="currentColor"
-                    strokeDasharray="314.159"
-                    strokeDashoffset="18.85"
-                    strokeLinecap="round"
-                    strokeWidth="9"
-                  ></circle>
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest leading-none">
-                    Score
-                  </span>
-                  <span className="font-stat-xl text-display-lg text-on-surface font-extrabold tracking-tight mt-1 leading-none">
-                    94
-                  </span>
-                  <span className="font-code-stat text-code-stat text-secondary mt-1">/ 100</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Continuous Telemetry Pods */}
-            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-surface-container">
-              <div className="flex flex-col items-center text-center">
-                <span className="material-symbols-outlined text-sm text-primary mb-1">bedtime</span>
-                <span className="font-stat-xl text-body-lg text-on-surface font-bold leading-tight">7.8h</span>
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Sleep</span>
-              </div>
-              <div className="flex flex-col items-center text-center">
-                <span className="material-symbols-outlined text-sm text-error mb-1">favorite</span>
-                <span className="font-stat-xl text-body-lg text-on-surface font-bold leading-tight">54</span>
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Rest HR</span>
-              </div>
-              <div className="flex flex-col items-center text-center">
-                <span className="material-symbols-outlined text-sm text-secondary mb-1">vital_signs</span>
-                <span className="font-stat-xl text-body-lg text-secondary font-bold leading-tight">68 ms</span>
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">HRV</span>
-              </div>
-            </div>
-          </article>
-
-          {/* Nutrient Intake Telemetry Card */}
-          <article className="p-6 rounded-xl bg-surface-container-low shadow-md flex flex-col gap-6 border border-surface-container-high/40">
-            <div className="flex items-center justify-between">
-              <div className="flex flex-col">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
-                  Metabolic Fueling
-                </span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface">Nutrient Intake</h3>
-              </div>
-              <span className="px-2.5 py-1 rounded-full bg-surface-container-high text-primary font-code-stat text-code-stat">
-                {nutrition ? `${nutrition.goal.target_calories - nutrition.total_calories} kcal left` : '550 kcal left'}
-              </span>
-            </div>
-
-            {/* Calorie Ring + Overview */}
-            <div className="flex items-center gap-6">
-              <div className="relative w-24 h-24 shrink-0 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle
-                    className="text-surface-container-highest"
-                    cx="50"
-                    cy="50"
-                    fill="none"
-                    r="40"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                  ></circle>
-                  <circle
-                    className="text-primary-container"
-                    cx="50"
-                    cy="50"
-                    fill="none"
-                    r="40"
-                    stroke="currentColor"
-                    strokeDasharray="251.3"
-                    strokeDashoffset="62.8"
-                    strokeLinecap="round"
-                    strokeWidth="8"
-                  ></circle>
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="font-stat-xl text-headline-sm text-on-surface font-bold leading-none">
-                    {nutrition?.total_calories || '1,650'}
-                  </span>
-                  <span className="font-label-sm text-[10px] text-on-surface-variant uppercase">kCal</span>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
-                  Target Budget
-                </span>
-                <span className="font-headline-sm text-headline-sm text-on-surface font-bold leading-none">
-                  {nutrition?.goal?.target_calories || 2200} kcal
-                </span>
-                <span className="font-body-sm text-body-sm text-secondary flex items-center gap-1 mt-1 font-medium">
-                  <span className="material-symbols-outlined text-xs">check_circle</span>
-                  On track for recovery goal
-                </span>
-              </div>
-            </div>
-
-            {/* Macro Progress Bars */}
-            <div className="flex flex-col gap-3.5">
-              {/* Protein */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-label-sm text-label-sm text-on-surface font-medium flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-primary-container"></span>
-                    Protein
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-code-stat text-code-stat text-on-surface">
-                      {nutrition ? `${nutrition.total_protein_g}g / ${nutrition.goal.target_protein_g}g` : '135g / 160g'}
-                    </span>
-                    <span className="font-code-stat text-code-stat text-primary-container font-bold">84%</span>
-                  </div>
-                </div>
-                <div className="w-full h-2 rounded-full bg-surface-container-high overflow-hidden">
-                  <div className="h-full bg-primary-container rounded-full" style={{ width: '84%' }}></div>
-                </div>
-              </div>
-
-              {/* Carbs */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-label-sm text-label-sm text-on-surface font-medium flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-secondary"></span>
-                    Carbohydrates
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-code-stat text-code-stat text-on-surface">
-                      {nutrition ? `${nutrition.total_carbs_g}g / ${nutrition.goal.target_carbs_g}g` : '180g / 250g'}
-                    </span>
-                    <span className="font-code-stat text-code-stat text-secondary font-bold">72%</span>
-                  </div>
-                </div>
-                <div className="w-full h-2 rounded-full bg-surface-container-high overflow-hidden">
-                  <div className="h-full bg-secondary rounded-full" style={{ width: '72%' }}></div>
-                </div>
-              </div>
-
-              {/* Fats */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-label-sm text-label-sm text-on-surface font-medium flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-tertiary-fixed-dim"></span>
-                    Fats
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-code-stat text-code-stat text-on-surface">
-                      {nutrition ? `${nutrition.total_fat_g}g / ${nutrition.goal.target_fat_g}g` : '52g / 70g'}
-                    </span>
-                    <span className="font-code-stat text-code-stat text-tertiary-fixed-dim font-bold">74%</span>
-                  </div>
-                </div>
-                <div className="w-full h-2 rounded-full bg-surface-container-high overflow-hidden">
-                  <div className="h-full bg-tertiary-fixed-dim rounded-full" style={{ width: '74%' }}></div>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          {/* Pose Engine Standby Card */}
-          <article
-            onClick={() => navigate('/workout/pose')}
-            className="p-5 rounded-xl bg-surface-container-low shadow-md flex items-center justify-between gap-4 relative overflow-hidden group cursor-pointer border border-surface-container-high/40 hover:bg-surface-container transition-all"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-12 h-12 rounded-xl bg-surface-container flex items-center justify-center text-primary-container relative shrink-0">
-                <span className="material-symbols-outlined text-2xl">videocam</span>
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-secondary shadow-[0_0_8px_rgba(78,222,163,0.9)] animate-pulse"></span>
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <span className="font-label-sm text-label-sm text-primary-container uppercase font-bold tracking-wide">
-                    Vision Engine
-                  </span>
-                  <span className="font-code-stat text-[10px] text-on-surface-variant bg-surface-container px-1.5 py-0.5 rounded">
-                    60 FPS
-                  </span>
-                </div>
-                <span className="font-label-md text-label-md text-on-surface font-medium mt-0.5">
-                  Squat Calibration Ready
-                </span>
-              </div>
-            </div>
-            <button
-              aria-label="Test Pose Tracker Calibration"
-              className="p-2.5 rounded-lg bg-surface-container-high text-on-surface hover:text-primary-container hover:bg-surface-container-highest transition-colors"
-              type="button"
-            >
-              <span className="material-symbols-outlined text-xl">tune</span>
-            </button>
-          </article>
-        </div>
+  return <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pb-16 pt-6 lg:px-8">
+    <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+      <div>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-on-surface-variant"><span className="rounded-full bg-surface-container-high px-3 py-1 text-primary">FitGenius dashboard</span><span>{today}</span>{wearable.data && <span>Wearable synced {new Date(wearable.data.recorded_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>}</div>
+        <h1 className="mt-3 text-3xl font-bold tracking-tight text-on-surface">Welcome back, {user?.display_name || 'athlete'}!</h1>
+        <p className="mt-2 max-w-2xl text-on-surface-variant">Your workouts, recovery, and nutrition at a glance. Dashboard metrics are based on your saved activity and connected wearable data.</p>
       </div>
+      <div className="flex flex-wrap gap-3">
+        <button type="button" onClick={() => navigate('/workout/recommend')} className="rounded-xl bg-primary-container px-5 py-3 font-bold text-on-primary-container">+ Log Workout</button>
+        <button type="button" onClick={() => navigate('/progress')} className="rounded-xl bg-surface-container-high px-5 py-3 font-semibold text-on-surface">View Progress</button>
+      </div>
+    </header>
+
+    {loading && <div role="status" className="rounded-xl bg-surface-container-low p-4 text-on-surface-variant">Loading your dashboard…</div>}
+
+    <section aria-label="Workout and recovery summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Stat label="Workouts this week" value={display(summary.data?.sessions_this_week)} detail={`${display(summary.data?.total_sessions)} completed overall`} icon="fitness_center" />
+      <Stat label="Weekly training time" value={weeklyHistory.isLoading ? '…' : `${Math.round(weeklyMinutes)} min`} detail={`${display(summary.data?.current_streak_days ?? gamification.data?.current_streak_days, ' day streak')}`} icon="timer" />
+      <Stat label="Bio-readiness" value={wearable.data?.recovery_score == null ? 'No wearable data' : `${wearable.data.recovery_score}/100`} detail={fatigue.data?.fatigue_level ? `${fatigue.data.fatigue_level} recovery` : 'Connect a wearable to see recovery'} icon="ecg_heart" />
+      <Stat label="HRV baseline" value={display(wearable.data?.hrv_ms, ' ms')} detail={`Resting HR ${display(wearable.data?.resting_heart_rate, ' bpm')}`} icon="vital_signs" />
+    </section>
+
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(330px,1fr)]">
+      <div className="flex flex-col gap-6">
+        <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5 shadow-lg md:p-7">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><p className="text-xs font-bold uppercase tracking-widest text-primary">Personalized workout</p><h2 className="mt-1 text-2xl font-bold text-on-surface">{exercises.length ? 'Your recommended session' : 'Get your workout recommendation'}</h2></div>
+            <button type="button" disabled={generateRecommendation.isPending} onClick={() => generateRecommendation.mutate()} className="rounded-lg bg-surface-container-high px-4 py-2 text-sm font-semibold text-on-surface disabled:opacity-50">{generateRecommendation.isPending ? 'Generating…' : exercises.length ? 'Refresh plan' : 'Generate plan'}</button>
+          </div>
+          {recommendation.isError && <p role="alert" className="mt-3 text-sm text-error">Could not load your recommendation. Try refreshing.</p>}
+          {generateRecommendation.isError && <p role="alert" className="mt-3 text-sm text-error">Could not generate a plan. Please try again.</p>}
+          {plan?.rationale && <p className="mt-3 text-sm text-on-surface-variant">{plan.rationale}</p>}
+          {exercises.length > 0 ? <>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3"><Stat label="Duration" value={display(plan?.estimated_duration_minutes, ' min')} detail="Personalized target" icon="schedule" compact /><Stat label="Exercises" value={String(exercises.length)} detail="In this plan" icon="reorder" compact /><Stat label="Plan confidence" value={`${Math.round((recommendation.data?.confidence_score ?? 0) * 100)}%`} detail={recommendation.data?.stage?.replace(/_/g, ' ') ?? 'Recommendation engine'} icon="auto_awesome" compact /></div>
+            <ul className="mt-5 divide-y divide-outline-variant/30">{exercises.slice(0, 4).map(item => <li key={item.exercise_id} className="flex items-center justify-between gap-4 py-3"><span className="font-medium text-on-surface">{item.name}{item.supports_pose_analysis && <span className="ml-2 rounded bg-primary-container/15 px-2 py-0.5 text-xs text-primary">Pose tracking</span>}</span><span className="shrink-0 text-sm text-on-surface-variant">{item.sets} sets{item.reps ? ` × ${item.reps} reps` : ''}</span></li>)}</ul>
+          </> : !recommendation.isLoading && <p className="mt-4 text-sm text-on-surface-variant">Generate a personalized session based on your workout history and recovery data.</p>}
+          <button type="button" onClick={() => navigate('/workout/recommend')} className="mt-5 w-full rounded-xl bg-primary-container px-5 py-3 font-bold text-on-primary-container">Open workout planner <span aria-hidden="true">→</span></button>
+        </section>
+
+        <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5 shadow-md md:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Last 7 days</p><h2 className="mt-1 text-xl font-bold text-on-surface">Weekly cadence</h2><p className="text-sm text-on-surface-variant">{Math.round(weeklyMinutes)} minutes of completed workouts</p></div><span className="rounded-full bg-secondary-container/20 px-3 py-1 text-sm font-semibold text-secondary">{gamification.data?.current_streak_days ?? 0} day streak</span></div>
+          {weeklyHistory.isError ? <p role="alert" className="mt-5 text-sm text-error">Weekly activity could not be loaded.</p> : <div className="mt-5 grid grid-cols-7 items-end gap-2" aria-label="Daily workout minutes for the last seven days">{days.map(day => <div key={day.key} className="flex flex-col items-center gap-2"><span className="text-xs text-on-surface-variant">{day.minutes ? `${Math.round(day.minutes)}m` : ''}</span><div className={`flex h-28 w-full items-end rounded-lg p-1 ${day.today ? 'bg-primary-container/15' : 'bg-surface-container-high'}`}><div title={`${day.label}: ${Math.round(day.minutes)} workout minutes`} className={`w-full rounded-md ${day.today ? 'bg-primary-container' : 'bg-secondary/70'}`} style={{ height: `${day.minutes ? Math.max(8, day.minutes / maxDay * 100) : 0}%` }} /></div><span className={`text-xs ${day.today ? 'font-bold text-primary' : 'text-on-surface-variant'}`}>{day.label}</span></div>)}</div>}
+          <button type="button" onClick={() => navigate('/progress')} className="mt-4 text-sm font-semibold text-primary underline">Explore workout analytics</button>
+        </section>
+
+        <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5 shadow-md md:p-6">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-tertiary">Recovery insight</p><h2 className="mt-1 text-xl font-bold text-on-surface">Today’s training guidance</h2></div><span className="material-symbols-outlined text-tertiary">psychology</span></div>
+          <p className="mt-3 text-on-surface-variant">{fatigue.data?.recommendation_note ?? 'Add wearable data to receive recovery-aware training guidance.'}</p>
+          {fatigue.data?.disclaimer && <p className="mt-2 text-xs text-on-surface-variant">{fatigue.data.disclaimer}</p>}
+          <button type="button" onClick={() => navigate('/coach')} className="mt-4 rounded-lg bg-tertiary-container/20 px-4 py-2 font-semibold text-tertiary">Ask your AI coach</button>
+        </section>
+      </div>
+
+      <aside className="flex flex-col gap-6">
+        <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5 shadow-md">
+          <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Metabolic fueling</p><h2 className="mt-1 text-xl font-bold text-on-surface">Nutrition today</h2></div><span className="material-symbols-outlined text-primary">restaurant</span></div>
+          {nutrition.isError ? <p role="alert" className="mt-4 text-sm text-error">Nutrition summary is unavailable.</p> : <>
+            <div className="mt-5 flex items-center gap-5"><div className="relative grid h-24 w-24 shrink-0 place-items-center rounded-full" style={{ background: `conic-gradient(#00f0ff ${percent(calories, calorieGoal)}%, #30343d 0)` }}><div className="grid h-[70px] w-[70px] place-items-center rounded-full bg-surface-container-low text-center"><span className="text-sm font-bold text-on-surface">{calories}<small className="block text-xs font-normal text-on-surface-variant">kcal</small></span></div></div><div><p className="text-sm text-on-surface-variant">Daily calorie target</p><p className="text-xl font-bold text-on-surface">{calorieGoal || '—'} kcal</p><p className="mt-1 text-sm text-secondary">{calorieGoal ? `${Math.max(0, calorieGoal - calories)} kcal remaining` : 'Set your nutrition goal'}</p></div></div>
+            <div className="mt-5 flex flex-col gap-4">{macros.map(macro => <div key={macro.name}><div className="flex justify-between text-sm"><span className="text-on-surface">{macro.name}</span><span className="text-on-surface-variant">{Math.round(macro.current)} / {macro.target || '—'} g</span></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface-container-high"><div className={`h-full rounded-full ${macro.color}`} style={{ width: `${percent(macro.current, macro.target)}%` }} /></div></div>)}</div>
+          </>}
+          <button type="button" onClick={() => navigate('/nutrition')} className="mt-5 w-full rounded-xl bg-surface-container-high px-4 py-3 font-semibold text-on-surface">Open nutrition planner</button>
+        </section>
+
+        <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5 shadow-md">
+          <div className="flex items-center gap-3"><span className="material-symbols-outlined text-2xl text-primary">videocam</span><div><h2 className="font-bold text-on-surface">Pose Tracker</h2><p className="text-sm text-on-surface-variant">Live exercise form and rep tracking</p></div></div>
+          <button type="button" onClick={() => navigate('/workout/pose')} className="mt-4 w-full rounded-xl bg-primary-container/15 px-4 py-3 font-semibold text-primary">Open Pose Tracker</button>
+        </section>
+
+        <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5 shadow-md">
+          <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Your milestones</p><h2 className="mt-1 text-xl font-bold text-on-surface">Training progress</h2></div><span className="material-symbols-outlined text-secondary">emoji_events</span></div>
+          <div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-lg bg-surface-container p-3"><p className="text-xs text-on-surface-variant">Total points</p><p className="mt-1 text-xl font-bold text-primary">{gamification.data?.total_points ?? 0}</p></div><div className="rounded-lg bg-surface-container p-3"><p className="text-xs text-on-surface-variant">Level</p><p className="mt-1 text-xl font-bold text-secondary">{gamification.data?.level ?? 1}</p></div></div>
+          <button type="button" onClick={() => navigate('/achievements')} className="mt-4 text-sm font-semibold text-primary underline">View achievements</button>
+        </section>
+      </aside>
     </div>
-  )
+
+    {(summary.isError || gamification.isError || wearable.isError || fatigue.isError) && <p role="status" className="text-sm text-on-surface-variant">Some dashboard data could not be loaded. Refresh the page or check your connection.</p>}
+  </main>
+}
+
+function Stat({ label, value, detail, icon, compact = false }: { label: string; value: string; detail: string; icon: string; compact?: boolean }) {
+  return <div className={`rounded-xl bg-surface-container ${compact ? 'p-3' : 'p-4'}`}><div className="flex items-center gap-2 text-on-surface-variant"><span className="material-symbols-outlined text-lg text-primary">{icon}</span><span className="text-xs uppercase tracking-wide">{label}</span></div><p className={`mt-2 font-bold text-on-surface ${compact ? 'text-lg' : 'text-2xl'}`}>{value}</p><p className="mt-1 text-xs text-on-surface-variant">{detail}</p></div>
 }

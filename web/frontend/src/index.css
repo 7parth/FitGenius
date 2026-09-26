@@ -67,6 +67,21 @@
 .simplified-ui .decorative { display: none !important; }
 .simplified-ui .nav-item-secondary { display: none !important; }
 
+.nutrition-input input,
+.nutrition-input select {
+  width: 100%;
+  border: 1px solid rgb(185 202 203 / 0.2);
+  border-radius: 0.75rem;
+  background: #181c24;
+  padding: 0.65rem 0.8rem;
+  color: #dfe2ee;
+}
+.nutrition-input input:focus,
+.nutrition-input select:focus {
+  outline: 2px solid #00f0ff;
+  outline-offset: 1px;
+}
+
 /* Focus styles — always visible, WCAG 2.1 AA */
 :focus-visible {
   outline: 2px solid var(--accent);
