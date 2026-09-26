@@ -1,9 +1,15 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from pathlib import Path
+
+
+_WEB_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Resolve the shared web/.env from this module location. A relative `.env`
+    # silently failed when uvicorn was launched from web/backend rather than web/.
+    model_config = SettingsConfigDict(env_file=_WEB_ROOT / ".env", extra="ignore")
 
     # App
     APP_NAME: str = "FitGenius API"

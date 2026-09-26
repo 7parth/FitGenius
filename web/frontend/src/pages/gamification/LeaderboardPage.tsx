@@ -400,7 +400,7 @@ export default function LeaderboardPage() {
             </div>
           </div>
 
-          {/* Pinned Sticky Current User Bar (Alex Rivera) */}
+          {/* Pinned Sticky Current User Bar (Parth Waradkar) */}
           <div className="sticky bottom-4 z-20 w-full rounded-2xl bg-gradient-to-r from-surface-container-high via-surface-container-highest to-surface-container-high p-4 shadow-[0_12px_32px_rgba(0,0,0,0.8),0_0_24px_rgba(0,240,255,0.2)] border border-primary-container/20">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -410,7 +410,7 @@ export default function LeaderboardPage() {
                   </span>
                   <div className="relative">
                     <img
-                      alt="Alex Rivera"
+                      alt="Parth Waradkar"
                       className="w-11 h-11 rounded-full object-cover shadow-[0_0_10px_rgba(0,240,255,0.4)]"
                       src="https://lh3.googleusercontent.com/aida-public/AB6AXuBjZpO_sRgX7rRdAqhuKyGsDj0COXfnsJmP09P_BAattNL1aMTwrngmkMzL9ON7qkM6Rim3gggQXXPWMYYA8GLOFYLmgsNVUMvpCcOgF3PwOzoB2rfOoXAmP6yNg1mG_GwTt4iX-bRot3wHXu58mUMRRg_Yicoya30-vBYfVdX_SLEMDDHMmJuQGLjKoU9y2PGyyHGFDTVDoAsuigh8COMLd0dT6V8vmoj0iikyHeKAkjWyn50GkDz4Xg"
                     />
@@ -418,7 +418,7 @@ export default function LeaderboardPage() {
                   </div>
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
-                      <span className="font-headline-sm text-headline-sm text-primary font-bold">Alex Rivera</span>
+                      <span className="font-headline-sm text-headline-sm text-primary font-bold">Parth Waradkar</span>
                       <span className="px-2 py-0.5 rounded-full bg-primary-container/20 text-primary font-label-sm text-label-sm font-bold uppercase">
                         YOU
                       </span>
@@ -622,7 +622,7 @@ export default function LeaderboardPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-amber-300">military_tech</span>
-                <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">Alex's Trophy Cabinet</span>
+                <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">Parth's Trophy Cabinet</span>
               </div>
               <span className="font-code-stat text-code-stat text-primary">14 / 36 UNLOCKED</span>
             </div>

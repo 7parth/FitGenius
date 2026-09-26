@@ -461,7 +461,7 @@ export default function RecommendationPage() {
               </div>
               <p className="text-on-surface leading-relaxed">
                 {recommendation?.payload?.rationale ||
-                  `"Alex, based on your 94% autonomic readiness and verified low lumbar shear strain from yesterday's deload, we have loaded an assertive 18,400 kg compound hypertrophic protocol. Today focuses on horizontal press recruitment and mechanical tension across the clavicular pectorals with deliberate 3-1-1-0 tempos."`}
+                  `"Parth, based on your 94% autonomic readiness and verified low lumbar shear strain from yesterday's deload, we have loaded an assertive 18,400 kg compound hypertrophic protocol. Today focuses on horizontal press recruitment and mechanical tension across the clavicular pectorals with deliberate 3-1-1-0 tempos."`}
               </p>
             </div>
           </div>

@@ -66,7 +66,7 @@ export default function RegisterPage() {
             className={`w-full px-4 py-2.5 rounded-xl bg-surface-container border text-sm text-on-surface transition-all focus:outline-none ${
               errors.display_name ? 'border-error focus:border-error' : 'border-outline-variant/40 focus:border-primary-container focus:ring-1 focus:ring-primary-container'
             }`}
-            placeholder="Alex Rivera"
+            placeholder="Parth Waradkar"
             aria-describedby={errors.display_name ? 'name-error' : undefined}
             aria-invalid={!!errors.display_name}
             {...register('display_name')}

@@ -83,7 +83,7 @@ export function AppLayout() {
               </div>
               <div className="hidden sm:flex flex-col text-left">
                 <span className="font-label-md text-label-md text-on-surface leading-tight group-hover:text-primary transition-colors">
-                  {user?.display_name || 'Alex Rivera'}
+                  {user?.display_name || 'Parth Waradkar'}
                 </span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant leading-none mt-0.5 uppercase tracking-wide">
                   {user?.role === 'admin' ? 'System Admin' : 'Pro Biohacker'}

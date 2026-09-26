@@ -1,667 +1,211 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api } from '@/lib/api'
+import { api, getErrorMessage } from '@/lib/api'
+import { useAuthStore } from '@/store/authStore'
 import { useVoice } from '@/hooks/useVoice'
 import { toast } from '@/components/ui/Toast'
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  ts: string
-  hasRoutine?: boolean
-}
+type Message = { role: 'user' | 'assistant'; content: string; ts: string; localId: string }
+type ConversationSummary = { id: string; title: string; message_count: number; last_message_at: string | null; created_at: string }
+type Telemetry = { source: string; recorded_at: string; resting_heart_rate?: number | null; avg_heart_rate?: number | null; hrv_ms?: number | null; sleep_hours?: number | null; sleep_quality_score?: number | null; recovery_score?: number | null; fatigue_level?: string }
+const quickPrompts = [
+  { label: 'Adjust for knee pain', prompt: 'I have knee discomfort. How can I adapt my workout safely?' },
+  { label: 'Post-workout meal ideas', prompt: 'Suggest a post-workout meal that supports recovery.' },
+  { label: 'Analyze weekly progress', prompt: 'Review my recent workouts and suggest one practical progression.' },
+  { label: 'Warm-up sequence', prompt: 'Give me a short warm-up for my next workout.' },
+]
+const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 export default function CoachPage() {
-  const qc = useQueryClient()
-  const [activeConvId, setActiveConvId] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const user = useAuthStore(state => state.user)
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [voiceActive, setVoiceActive] = useState(false)
-  const [acceptedRoutine, setAcceptedRoutine] = useState(false)
+  const [voiceReplies, setVoiceReplies] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [telemetryOpen, setTelemetryOpen] = useState(false)
+  const [selectingConversation, setSelectingConversation] = useState(false)
+  const [attachedName, setAttachedName] = useState('')
+  const [lastReplyProvider, setLastReplyProvider] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content:
-        "Good morning Alex. Synced with your smart band telemetry: resting heart rate is steady at 54 bpm, but recovery markers indicate localized spinal tension from yesterday's heavy squats.",
-      ts: '10:11 AM',
-    },
-    {
-      role: 'user',
-      content: 'I have lower back soreness today. How should I adjust my leg workout?',
-      ts: '10:14 AM',
-    },
-    {
-      role: 'assistant',
-      content:
-        "I've detected your fatigue notes from yesterday's squats and wearable telemetry. Let's swap heavy Barbell Deadlifts for Glute Bridges and Seated Leg Curls to decompress your lumbar spine while maintaining posterior chain hypertrophy.",
-      ts: '10:14 AM',
-      hasRoutine: true,
-    },
-  ])
+  const engine = useQuery({ queryKey: ['coach-engine'], queryFn: () => api.get('/coach/engine').then(response => response.data) })
+  const conversations = useQuery<ConversationSummary[]>({ queryKey: ['coach-conversations'], queryFn: () => api.get('/coach/conversations').then(response => response.data) })
+  const profile = useQuery({ queryKey: ['profile-me'], queryFn: () => api.get('/profile/me').then(response => response.data) })
+  const wearable = useQuery<Telemetry | null>({ queryKey: ['coach-wearable'], queryFn: () => api.get('/wearables/data?page=1&page_size=1').then(response => response.data[0] ?? null) })
+  const fatigue = useQuery({ queryKey: ['wearable-fatigue'], queryFn: () => api.get('/wearables/fatigue').then(response => response.data) })
+  const workoutHistory = useQuery({ queryKey: ['coach-workout-history'], queryFn: () => api.get('/workouts/history?page=1&page_size=3').then(response => response.data.items) })
 
-  const { isListening, transcript, toggleListening, speak } = useVoice({
-    onResult: (text, isFinal) => {
-      if (isFinal) setInput(prev => prev + (prev ? ' ' : '') + text)
+  const voice = useVoice({ onResult: (transcript, isFinal) => { if (isFinal) setInput(current => `${current}${current ? ' ' : ''}${transcript}`) } })
+
+  const sendMessage = useMutation({
+    mutationFn: ({ content, localId: _localId }: { content: string; localId: string }) => api.post('/coach/message', { content, conversation_id: conversationId }).then(response => response.data),
+    onMutate: ({ content, localId }) => setMessages(current => [...current, { role: 'user', content, ts: nowLabel(), localId }]),
+    onSuccess: response => {
+      setConversationId(response.conversation_id)
+      setLastReplyProvider(response.engine ?? null)
+      setMessages(current => [...current, { role: 'assistant', content: response.reply, ts: nowLabel(), localId: crypto.randomUUID() }])
+      void queryClient.invalidateQueries({ queryKey: ['coach-conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['coach-conversation', response.conversation_id] })
+      if (voiceReplies) voice.speak(response.reply)
+    },
+    onError: (error, variables) => {
+      setMessages(current => current.filter(message => message.localId !== variables.localId))
+      setInput(current => current || variables.content)
+      toast.error(getErrorMessage(error))
     },
   })
 
-  // Auto-send when voice finishes
-  useEffect(() => {
-    if (!isListening && transcript && voiceActive) {
-      handleSend(transcript)
-    }
-  }, [isListening, transcript, voiceActive])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  const sendMutation = useMutation({
-    mutationFn: (content: string) =>
-      api.post('/coach/message', { content, conversation_id: activeConvId }).then(r => r.data),
-    onMutate: (content) => {
-      const userMsg: Message = {
-        role: 'user',
-        content,
-        ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }
-      setMessages(prev => [...prev, userMsg])
+  const deleteConversation = useMutation({
+    mutationFn: (id: string) => api.delete(`/coach/conversations/${id}`),
+    onSuccess: (_, id) => {
+      void queryClient.invalidateQueries({ queryKey: ['coach-conversations'] })
+      if (conversationId === id) startNewConversation()
+      toast.info('Conversation deleted.')
     },
-    onSuccess: (data) => {
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: data.reply,
-        ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }
-      setMessages(prev => [...prev, assistantMsg])
-      if (!activeConvId && data.conversation_id) setActiveConvId(data.conversation_id)
-      if (voiceActive) speak(data.reply)
-    },
-    onError: () => {
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: 'Biometric telemetry stream re-aligning. Please retry prompt.',
-          ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ])
-    },
+    onError: error => toast.error(getErrorMessage(error)),
   })
 
-  const handleSend = (textToSend?: string) => {
-    const content = (textToSend || input).trim()
-    if (!content || sendMutation.isPending) return
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages, sendMessage.isPending])
+
+  const startNewConversation = () => {
+    setConversationId(null)
+    setMessages([])
     setInput('')
-    sendMutation.mutate(content)
+    setHistoryOpen(false)
+    setAttachedName('')
   }
 
-  const handlePromptClick = (prompt: string) => {
-    handleSend(prompt)
+  const selectConversation = async (item: ConversationSummary) => {
+    setSelectingConversation(true)
+    try {
+      const { data } = await api.get(`/coach/conversations/${item.id}`)
+      setConversationId(item.id)
+      setMessages(data.messages.map((message: { role: 'user' | 'assistant'; content: string; ts: string }, index: number) => ({ ...message, localId: `${item.id}-${index}` })))
+      setHistoryOpen(false)
+    } catch (error) {
+      toast.error(getErrorMessage(error))
+    } finally {
+      setSelectingConversation(false)
+    }
   }
 
-  return (
-    <div className="flex flex-col w-full pb-8">
-      <div className="grid grid-cols-12 gap-6 items-start">
-        {/* MAIN COACH CHAT STUDIO (Left 8 Cols) */}
-        <section className="col-span-12 xl:col-span-8 flex flex-col h-[calc(100vh-6rem)] bg-surface-container-low rounded-2xl shadow-[0_4px_30px_rgba(0,0,0,0.6)] overflow-hidden relative">
-          {/* Ambient Glow Orbs */}
-          <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-tertiary-container/10 blur-[100px] pointer-events-none" />
-          <div className="absolute -bottom-24 right-1/4 w-96 h-96 rounded-full bg-primary-container/10 blur-[120px] pointer-events-none" />
+  const submitMessage = (content = input) => {
+    const trimmed = content.trim()
+    if (!trimmed || sendMessage.isPending) return
+    sendMessage.mutate({ content: trimmed, localId: crypto.randomUUID() })
+    setInput('')
+    setAttachedName('')
+  }
 
-          {/* Coach Studio Header */}
-          <header className="px-6 py-4 bg-surface-container/90 backdrop-blur-xl flex items-center justify-between z-10 border-b border-surface-container-high/40">
-            <div className="flex items-center gap-3.5">
-              <div className="relative flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-tertiary-container/30 to-on-tertiary-container/40 shadow-[0_0_20px_rgba(139,92,246,0.35)]">
-                <span className="material-symbols-outlined text-tertiary text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  psychology
-                </span>
-                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-secondary rounded-full shadow-[0_0_8px_rgba(78,222,163,0.9)]" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <h1 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">Coach FitGenius v4.2</h1>
-                  <span className="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-tertiary-container/20 text-tertiary tracking-wider font-semibold">
-                    NEURAL BIO-AI
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse shadow-[0_0_6px_rgba(0,240,255,0.8)]" />
-                  <p className="font-code-stat text-code-stat text-on-surface-variant">Biometric Session Active • Real-time Telemetry Stream</p>
-                </div>
-              </div>
-            </div>
+  const recalibrate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['coach-engine'] }),
+      queryClient.invalidateQueries({ queryKey: ['coach-conversations'] }),
+      queryClient.invalidateQueries({ queryKey: ['profile-me'] }),
+      queryClient.invalidateQueries({ queryKey: ['coach-wearable'] }),
+      queryClient.invalidateQueries({ queryKey: ['wearable-fatigue'] }),
+      queryClient.invalidateQueries({ queryKey: ['coach-workout-history'] }),
+    ])
+    toast.success('Coach context refreshed from your latest profile and wearable data.')
+  }
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => toast.info('Telemetry Log: All 14 biometric sensors calibrated & streaming.')}
-                className="p-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface transition-colors"
-                title="Session Telemetry Log"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-lg">timeline</span>
-              </button>
-              <button
-                onClick={() => {
-                  setVoiceActive(v => !v)
-                  toast.info(voiceActive ? 'Voice Synth deactivated' : 'Voice Synth activated')
-                }}
-                className={`p-2 rounded-lg transition-colors ${
-                  voiceActive
-                    ? 'bg-primary-container text-on-primary-container shadow-[0_0_12px_rgba(0,240,255,0.4)]'
-                    : 'bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface'
-                }`}
-                title="Voice Response Synth"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-lg">volume_up</span>
-              </button>
-              <button
-                onClick={() => toast.success('Neural weights recalibrated with today\'s wearable baseline!')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-md text-label-md transition-colors"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-base">refresh</span>
-                <span>Recalibrate</span>
-              </button>
-            </div>
-          </header>
+  const attachTextFile = async (file?: File) => {
+    if (!file) return
+    if (!/\.(txt|csv|json)$/i.test(file.name)) return toast.error('Attach a .txt, .csv, or .json telemetry export.')
+    if (file.size > 50_000) return toast.error('File is larger than 50 KB. Attach a smaller export.')
+    try {
+      const text = await file.text()
+      setInput(current => `${current}${current ? '\n\n' : ''}[Attached ${file.name}]\n${text.slice(0, 3500)}`.slice(0, 4000))
+      setAttachedName(file.name)
+      toast.success('File contents added to your draft. Review it before sending.')
+    } catch {
+      toast.error('Could not read that file.')
+    }
+  }
 
-          {/* Chat Messages Stream */}
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6 z-10 scrollbar-none">
-            {/* Session Initiated Pill */}
-            <div className="flex justify-center">
-              <span className="px-3 py-1 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm">
-                Session Initiated • 10:10 AM • Connected Wearable: Ring Gen3 + Strap V2
-              </span>
-            </div>
+  const latestWorkout = workoutHistory.data?.[0]
+  const displayFatigue = fatigue.data?.fatigue_level
+  const engineLabel = lastReplyProvider
+    ? `Last reply · ${lastReplyProvider}`
+    : engine.data?.active
+      ? `${engine.data.provider} · ${engine.data.model}`
+      : 'Offline response mode'
+  const syncedAt = wearable.data?.recorded_at ? new Date(wearable.data.recorded_at).toLocaleString() : null
 
-            {/* Message Map */}
-            {messages.map((msg, idx) => {
-              if (msg.role === 'assistant') {
-                return (
-                  <div key={idx} className="flex items-start gap-3.5 max-w-3xl">
-                    <div className="w-8 h-8 rounded-lg bg-tertiary-container/20 flex items-center justify-center shrink-0 shadow-[0_0_12px_rgba(139,92,246,0.25)]">
-                      <span className="material-symbols-outlined text-tertiary text-base" style={{ fontVariationSettings: "'FILL' 1" }}>
-                        neurology
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-3 w-full">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-label-md text-label-md text-tertiary font-semibold">FitGenius Bio-Core</span>
-                        <span className="font-code-stat text-code-stat text-on-surface-variant">{msg.ts}</span>
-                      </div>
-                      <div className="p-4 rounded-2xl rounded-tl-sm bg-surface-container text-on-surface shadow-[0_2px_12px_rgba(0,0,0,0.3)] leading-relaxed prose-coach">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            p: ({ children }) => <p className="mb-2 last:mb-0 font-body-md text-body-md leading-relaxed">{children}</p>,
-                            strong: ({ children }) => <strong className="font-semibold text-on-surface">{children}</strong>,
-                            em: ({ children }) => <em className="italic text-on-surface-variant">{children}</em>,
-                            h1: ({ children }) => <h1 className="font-headline-sm text-headline-sm text-on-surface font-bold mt-3 mb-1">{children}</h1>,
-                            h2: ({ children }) => <h2 className="font-title-md text-on-surface font-semibold mt-2.5 mb-1">{children}</h2>,
-                            h3: ({ children }) => <h3 className="font-label-lg text-on-surface font-semibold mt-2 mb-0.5">{children}</h3>,
-                            ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2 text-on-surface">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2 text-on-surface">{children}</ol>,
-                            li: ({ children }) => <li className="font-body-md text-body-md leading-relaxed">{children}</li>,
-                            blockquote: ({ children }) => (
-                              <blockquote className="border-l-2 border-primary-container pl-3 my-2 text-on-surface-variant italic">{children}</blockquote>
-                            ),
-                            code: ({ inline, children }: any) =>
-                              inline ? (
-                                <code className="px-1.5 py-0.5 rounded bg-surface-container-high text-primary font-code-stat text-code-stat">{children}</code>
-                              ) : (
-                                <pre className="my-2 p-3 rounded-xl bg-surface-container-high overflow-x-auto">
-                                  <code className="font-code-stat text-code-stat text-on-surface">{children}</code>
-                                </pre>
-                              ),
-                            hr: () => <hr className="my-3 border-surface-container-high" />,
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
+  return <main className="grid w-full grid-cols-12 items-start gap-5 pb-8">
+    <section className="relative col-span-12 flex h-[calc(100vh-6rem)] min-h-[560px] flex-col overflow-hidden rounded-2xl bg-surface-container-low shadow-[0_4px_30px_rgba(0,0,0,0.6)] xl:col-span-8">
+      <div className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-tertiary-container/10 blur-[100px]" />
+      <div className="pointer-events-none absolute -bottom-24 right-1/4 h-96 w-96 rounded-full bg-primary-container/10 blur-[120px]" />
+      <header className="z-10 flex items-center justify-between gap-3 border-b border-surface-container-high/40 bg-surface-container/90 px-4 py-4 backdrop-blur-xl sm:px-6">
+        <div className="flex min-w-0 items-center gap-3"><div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-tertiary-container/20 text-tertiary"><span className="material-symbols-outlined text-2xl">psychology</span><span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ${engine.data?.active ? 'bg-secondary' : 'bg-tertiary-fixed-dim'}`} /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h1 className="font-bold text-on-surface">Coach FitGenius</h1><span className="rounded-full bg-tertiary-container/20 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-tertiary">BIO-AI</span></div><p className="truncate text-xs text-on-surface-variant">{engine.isLoading ? 'Checking coach engine…' : engineLabel}</p></div></div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button type="button" onClick={() => setTelemetryOpen(true)} aria-label="Session telemetry log" title="Session telemetry log" className="rounded-lg bg-surface-container-high p-2 text-on-surface-variant hover:text-on-surface"><span className="material-symbols-outlined">timeline</span></button>
+          <button type="button" onClick={() => setHistoryOpen(true)} aria-label="Conversation history" title="Conversation history" className="rounded-lg bg-surface-container-high p-2 text-on-surface-variant hover:text-on-surface"><span className="material-symbols-outlined">forum</span></button>
+          <button type="button" onClick={() => { setVoiceReplies(current => !current); if (voiceReplies) voice.cancelSpeech() }} aria-pressed={voiceReplies} aria-label={voiceReplies ? 'Mute coach voice replies' : 'Enable coach voice replies'} title="Voice replies" className={`rounded-lg p-2 ${voiceReplies ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-high text-on-surface-variant'}`}><span className="material-symbols-outlined">{voiceReplies ? 'volume_up' : 'volume_off'}</span></button>
+          <button type="button" onClick={() => void recalibrate()} disabled={engine.isFetching || wearable.isFetching} className="flex items-center gap-1.5 rounded-lg bg-surface-container-high px-3 py-2 text-sm text-on-surface disabled:opacity-50"><span className="material-symbols-outlined text-base">refresh</span><span className="hidden sm:inline">Refresh data</span></button>
+          <button type="button" onClick={startNewConversation} className="rounded-lg bg-primary-container px-3 py-2 text-sm font-bold text-on-primary-container">New chat</button>
+        </div>
+      </header>
 
-                      {/* Interactive Routine Card (if present on assistant message) */}
-                      {msg.hasRoutine && (
-                        <div className="rounded-2xl bg-surface-container-high p-5 shadow-[0_4px_24px_rgba(0,0,0,0.4)] flex flex-col gap-4">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2">
-                                <span className="material-symbols-outlined text-secondary text-lg">healing</span>
-                                <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">
-                                  Modified Routine: Low-Impact Lower Body
-                                </h2>
-                              </div>
-                              <p className="font-body-sm text-body-sm text-on-surface-variant">
-                                Biomechanically optimized to suppress vertical spine compressive loads
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1.5 justify-end">
-                              <span className="px-2.5 py-1 rounded-full bg-secondary-container/20 text-secondary font-label-sm text-label-sm font-semibold">
-                                Lumbar Protection
-                              </span>
-                              <span className="px-2.5 py-1 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm font-medium">
-                                35 min
-                              </span>
-                              <span className="px-2.5 py-1 rounded-full bg-surface-container text-primary font-code-stat text-code-stat">
-                                Axial Load 1/5
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Exercise List */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <div className="flex items-center justify-between p-3 rounded-xl bg-surface-container/70 hover:bg-surface-container transition-colors">
-                              <div className="flex items-center gap-3">
-                                <span className="w-6 h-6 rounded-md bg-secondary/10 text-secondary flex items-center justify-center font-code-stat text-code-stat font-bold">
-                                  1
-                                </span>
-                                <div>
-                                  <p className="font-label-md text-label-md text-on-surface font-semibold">Glute Bridges</p>
-                                  <p className="font-body-sm text-body-sm text-on-surface-variant">Target: Gluteus Maximus</p>
-                                </div>
-                              </div>
-                              <span className="font-code-stat text-code-stat text-primary font-semibold bg-surface-container-low px-2 py-1 rounded">
-                                4 × 12 reps
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 rounded-xl bg-surface-container/70 hover:bg-surface-container transition-colors">
-                              <div className="flex items-center gap-3">
-                                <span className="w-6 h-6 rounded-md bg-secondary/10 text-secondary flex items-center justify-center font-code-stat text-code-stat font-bold">
-                                  2
-                                </span>
-                                <div>
-                                  <p className="font-label-md text-label-md text-on-surface font-semibold">Seated Leg Curls</p>
-                                  <p className="font-body-sm text-body-sm text-on-surface-variant">Target: Biceps Femoris</p>
-                                </div>
-                              </div>
-                              <span className="font-code-stat text-code-stat text-primary font-semibold bg-surface-container-low px-2 py-1 rounded">
-                                3 × 15 reps
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 rounded-xl bg-surface-container/70 hover:bg-surface-container transition-colors">
-                              <div className="flex items-center gap-3">
-                                <span className="w-6 h-6 rounded-md bg-secondary/10 text-secondary flex items-center justify-center font-code-stat text-code-stat font-bold">
-                                  3
-                                </span>
-                                <div>
-                                  <p className="font-label-md text-label-md text-on-surface font-semibold">Goblet Squats</p>
-                                  <p className="font-body-sm text-body-sm text-on-surface-variant">Upright posture • Low stress</p>
-                                </div>
-                              </div>
-                              <span className="font-code-stat text-code-stat text-primary font-semibold bg-surface-container-low px-2 py-1 rounded">
-                                3 × 10 reps
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 rounded-xl bg-surface-container/70 hover:bg-surface-container transition-colors">
-                              <div className="flex items-center gap-3">
-                                <span className="w-6 h-6 rounded-md bg-secondary/10 text-secondary flex items-center justify-center font-code-stat text-code-stat font-bold">
-                                  4
-                                </span>
-                                <div>
-                                  <p className="font-label-md text-label-md text-on-surface font-semibold">Hanging Knee Raises</p>
-                                  <p className="font-body-sm text-body-sm text-on-surface-variant">Lumbar traction & core</p>
-                                </div>
-                              </div>
-                              <span className="font-code-stat text-code-stat text-primary font-semibold bg-surface-container-low px-2 py-1 rounded">
-                                3 × 12 reps
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Routine Actions */}
-                          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                            <div className="flex items-center gap-2 text-on-surface-variant font-code-stat text-code-stat">
-                              <span className="material-symbols-outlined text-sm text-primary">sync_alt</span>
-                              <span>Estimated Volume: 5,420 kg</span>
-                            </div>
-                            <div className="flex items-center gap-2.5">
-                              <button
-                                onClick={() => toast.info('Routine customization panel open.')}
-                                className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-highest text-on-surface font-label-md text-label-md font-semibold transition-all"
-                                type="button"
-                              >
-                                Customize
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setAcceptedRoutine(true)
-                                  toast.success('Routine loaded into Live Session Engine!')
-                                }}
-                                className={`flex items-center gap-2 px-5 py-2 rounded-lg font-label-md text-label-md font-bold transition-all ${
-                                  acceptedRoutine
-                                    ? 'bg-secondary text-on-secondary shadow-[0_0_20px_rgba(78,222,163,0.5)]'
-                                    : 'bg-primary-container text-on-primary-container shadow-[0_0_20px_rgba(0,240,255,0.35)] hover:shadow-[0_0_28px_rgba(0,240,255,0.55)]'
-                                }`}
-                                type="button"
-                              >
-                                <span className="material-symbols-outlined text-base">
-                                  {acceptedRoutine ? 'task_alt' : 'check_circle'}
-                                </span>
-                                <span>{acceptedRoutine ? 'Routine Loaded!' : 'Accept & Load Routine'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {msg.hasRoutine && (
-                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary-container/15 text-secondary self-start">
-                          <span className="material-symbols-outlined text-sm">verified</span>
-                          <span className="font-label-sm text-label-sm">Spine biomechanics adjusted • Estimated recovery: 18 hours</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              } else {
-                return (
-                  <div key={idx} className="flex items-start justify-end gap-3.5 pl-12">
-                    <div className="flex flex-col items-end gap-1.5 max-w-xl">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-code-stat text-code-stat text-on-surface-variant">{msg.ts}</span>
-                        <span className="font-label-md text-label-md text-primary font-semibold">Alex Rivera</span>
-                      </div>
-                      <div className="p-4 rounded-2xl rounded-tr-sm bg-surface-container-high text-on-surface shadow-[0_2px_12px_rgba(0,0,0,0.3)]">
-                        {msg.content}
-                      </div>
-                    </div>
-                    <img
-                      alt="Alex Rivera Portrait"
-                      className="w-8 h-8 rounded-lg object-cover ring-2 ring-primary-container/40 shrink-0 shadow-[0_0_10px_rgba(0,240,255,0.2)]"
-                      src="https://lh3.googleusercontent.com/aida/AEtjO1WdHxtPl2ltuT3ijOLJ7NbbfLGLxlCkaSOV6kPocKKr5pQ218Vaec6V3CVrc_-2uaDxSk5Jdjvpgj_383_-uGvw_fDfPUtRJnaVlkz_iRK07sRaJOyQLlbhL0jiv8UVhEfCrXnmIGJDaFS1it0FMczItWtAbMq1sKf-c-Z_OLEziw9yw7lYAhKg34L6-VizfZxdHrhQEZMHRc36Xheh0CeyT8uKKCEEUCvlza-a3_fL9W83aswqK6gpusk"
-                    />
-                  </div>
-                )
-              }
-            })}
-
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Coach Input & Prompt Bar */}
-          <footer className="p-4 bg-surface-container/95 backdrop-blur-xl flex flex-col gap-3 z-10 border-t border-surface-container-high/40">
-            {/* Prompt Quick Chips */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider shrink-0 flex items-center gap-1">
-                <span className="material-symbols-outlined text-xs text-tertiary">bolt</span> Prompts:
-              </span>
-              <button
-                onClick={() => handlePromptClick('Adjust for knee pain during squatting')}
-                className="px-3 py-1 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-sm text-label-sm whitespace-nowrap transition-colors"
-                type="button"
-              >
-                Adjust for knee pain
-              </button>
-              <button
-                onClick={() => handlePromptClick('Post-workout high protein meal ideas with 40g+ protein')}
-                className="px-3 py-1 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-sm text-label-sm whitespace-nowrap transition-colors"
-                type="button"
-              >
-                Post-workout meal ideas
-              </button>
-              <button
-                onClick={() => handlePromptClick('Analyze my weekly volume and progressive overload progression')}
-                className="px-3 py-1 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-sm text-label-sm whitespace-nowrap transition-colors"
-                type="button"
-              >
-                Analyze my weekly progress
-              </button>
-              <button
-                onClick={() => handlePromptClick('Generate a dynamic 5-minute warm-up sequence for squats')}
-                className="px-3 py-1 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-sm text-label-sm whitespace-nowrap transition-colors"
-                type="button"
-              >
-                Warm-up sequence
-              </button>
-            </div>
-
-            {/* Input Form */}
-            <form
-              className="flex items-center gap-2"
-              onSubmit={e => {
-                e.preventDefault()
-                handleSend()
-              }}
-            >
-              <div className="relative flex-1 flex items-center">
-                <button
-                  onClick={() => toast.info('File attachment: upload workout video or wearable CSV')}
-                  className="absolute left-3.5 p-1 rounded-lg text-on-surface-variant hover:text-primary transition-colors"
-                  title="Attach Telemetry Log or Video"
-                  type="button"
-                >
-                  <span className="material-symbols-outlined text-xl">attach_file</span>
-                </button>
-                <input
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  className="w-full pl-12 pr-12 py-3 rounded-xl bg-surface-container-high text-on-surface placeholder:text-on-surface-variant font-body-md text-body-md focus:outline-none focus:ring-1 focus:ring-primary-container focus:shadow-[0_0_16px_rgba(0,240,255,0.25)] transition-all"
-                  placeholder="Ask Coach FitGenius anything..."
-                  type="text"
-                />
-                <button
-                  onClick={toggleListening}
-                  className={`absolute right-3.5 p-1 rounded-lg transition-colors ${
-                    isListening ? 'text-primary animate-pulse' : 'text-on-surface-variant hover:text-tertiary'
-                  }`}
-                  title={isListening ? 'Listening...' : 'Voice Input'}
-                  type="button"
-                >
-                  <span className="material-symbols-outlined text-xl">mic</span>
-                </button>
-              </div>
-
-              <button
-                className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary-container text-on-primary-container shadow-[0_0_20px_rgba(0,240,255,0.4)] hover:shadow-[0_0_28px_rgba(0,240,255,0.6)] transition-all shrink-0"
-                type="submit"
-                disabled={sendMutation.isPending}
-              >
-                <span className="material-symbols-outlined text-2xl font-bold">arrow_upward</span>
-              </button>
-            </form>
-          </footer>
-        </section>
-
-        {/* RIGHT ASIDE: BIOMETRIC TELEMETRY & STRAIN (Right 4 Cols) */}
-        <aside className="col-span-12 xl:col-span-4 flex flex-col gap-4">
-          {/* Athlete Profile Card */}
-          <div className="bg-surface-container-low p-5 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.5)] flex flex-col gap-4 relative overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <img
-                    alt="Alex Rivera"
-                    className="w-12 h-12 rounded-xl object-cover ring-2 ring-secondary/50 shadow-[0_0_12px_rgba(78,222,163,0.3)]"
-                    src="https://lh3.googleusercontent.com/aida/AEtjO1WdHxtPl2ltuT3ijOLJ7NbbfLGLxlCkaSOV6kPocKKr5pQ218Vaec6V3CVrc_-2uaDxSk5Jdjvpgj_383_-uGvw_fDfPUtRJnaVlkz_iRK07sRaJOyQLlbhL0jiv8UVhEfCrXnmIGJDaFS1it0FMczItWtAbMq1sKf-c-Z_OLEziw9yw7lYAhKg34L6-VizfZxdHrhQEZMHRc36Xheh0CeyT8uKKCEEUCvlza-a3_fL9W83aswqK6gpusk"
-                  />
-                  <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-secondary rounded-full ring-2 ring-surface-container-low" />
-                </div>
-                <div className="flex flex-col">
-                  <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold leading-tight">Alex Rivera</h2>
-                  <span className="font-label-sm text-label-sm text-on-surface-variant">Tier: Intermediate • Age 28</span>
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-lg bg-primary-container/15 text-primary font-code-stat text-code-stat font-semibold">
-                HYPERTROPHY
-              </span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <div className="bg-surface-container p-2.5 rounded-xl flex flex-col">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Body Fat</span>
-                <span className="font-stat-xl text-headline-sm text-on-surface font-bold mt-0.5">13.2%</span>
-              </div>
-              <div className="bg-surface-container p-2.5 rounded-xl flex flex-col">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Skeletal</span>
-                <span className="font-stat-xl text-headline-sm text-on-surface font-bold mt-0.5">37.8 kg</span>
-              </div>
-              <div className="bg-surface-container p-2.5 rounded-xl flex flex-col">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Readiness</span>
-                <span className="font-stat-xl text-headline-sm text-secondary font-bold mt-0.5">88/100</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Physiological Strain Card */}
-          <div className="bg-surface-container-low p-5 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.5)] flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary text-xl">biotech</span>
-                <h3 className="font-label-md text-label-md text-on-surface uppercase tracking-wider font-semibold">
-                  Physiological Strain
-                </h3>
-              </div>
-              <span className="font-code-stat text-code-stat text-secondary font-semibold">SENSORS ONLINE</span>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="flex items-baseline justify-between">
-                <span className="font-body-md text-body-md text-on-surface font-medium">Mild Lumbar Fatigue</span>
-                <span className="font-stat-xl text-headline-sm text-primary font-bold">
-                  68% <span className="font-body-sm text-body-sm text-on-surface-variant font-normal">Load</span>
-                </span>
-              </div>
-              <div className="w-full h-3 rounded-full bg-surface-container overflow-hidden p-0.5">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-secondary via-primary-container to-error"
-                  style={{ width: '68%' }}
-                />
-              </div>
-              <div className="flex justify-between font-code-stat text-code-stat text-on-surface-variant">
-                <span>Optimal (0-40%)</span>
-                <span>Target Zone (41-75%)</span>
-                <span>Critical (&gt;75%)</span>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-error-container/20 flex items-start gap-3">
-              <span className="material-symbols-outlined text-error text-xl shrink-0 mt-0.5">warning</span>
-              <div className="flex flex-col gap-0.5">
-                <p className="font-label-md text-label-md text-error font-semibold">Strain Concentration Warning</p>
-                <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  Fatigue detected in erector spinae. Axial decompression suggested before compound overhead press.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Live Smart Watch Vitals */}
-          <div className="bg-surface-container-low p-5 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.5)] flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary text-xl">watch</span>
-                <h3 className="font-label-md text-label-md text-on-surface uppercase tracking-wider font-semibold">
-                  Live Smart Watch Vitals
-                </h3>
-              </div>
-              <span className="w-2 h-2 rounded-full bg-secondary animate-ping" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-xl bg-surface-container flex flex-col gap-1">
-                <div className="flex items-center justify-between text-on-surface-variant">
-                  <span className="font-label-sm text-label-sm uppercase">Resting HR</span>
-                  <span className="material-symbols-outlined text-error text-base">favorite</span>
-                </div>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="font-stat-xl text-stat-xl text-on-surface font-bold leading-none">54</span>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">BPM</span>
-                </div>
-                <span className="font-label-sm text-label-sm text-secondary mt-1 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-xs">trending_down</span> -3 bpm vs avg
-                </span>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-surface-container flex flex-col gap-1">
-                <div className="flex items-center justify-between text-on-surface-variant">
-                  <span className="font-label-sm text-label-sm uppercase">HRV Status</span>
-                  <span className="material-symbols-outlined text-secondary text-base">ecg_heart</span>
-                </div>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="font-stat-xl text-stat-xl text-on-surface font-bold leading-none">72</span>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">ms</span>
-                </div>
-                <span className="font-label-sm text-label-sm text-secondary mt-1 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-xs">check</span> Optimal Parasym
-                </span>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-surface-container flex flex-col gap-1">
-                <div className="flex items-center justify-between text-on-surface-variant">
-                  <span className="font-label-sm text-label-sm uppercase">Skin Temp</span>
-                  <span className="material-symbols-outlined text-primary text-base">thermostat</span>
-                </div>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="font-stat-xl text-stat-xl text-on-surface font-bold leading-none">97.8</span>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">°F</span>
-                </div>
-                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Baseline: ±0.1°</span>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-surface-container flex flex-col gap-1">
-                <div className="flex items-center justify-between text-on-surface-variant">
-                  <span className="font-label-sm text-label-sm uppercase">Sleep Score</span>
-                  <span className="material-symbols-outlined text-tertiary text-base">bedtime</span>
-                </div>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="font-stat-xl text-stat-xl text-on-surface font-bold leading-none">89</span>
-                  <span className="font-code-stat text-code-stat text-on-surface-variant">/100</span>
-                </div>
-                <span className="font-label-sm text-label-sm text-tertiary mt-1">2h 14m Deep Rest</span>
-              </div>
-            </div>
-          </div>
-
-          {/* AI Adaptive History */}
-          <div className="bg-surface-container-low p-5 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.5)] flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-tertiary text-xl">auto_fix_high</span>
-                <h3 className="font-label-md text-label-md text-on-surface uppercase tracking-wider font-semibold">
-                  AI Adaptive History
-                </h3>
-              </div>
-              <span className="font-code-stat text-code-stat text-on-surface-variant">Last 7 Days</span>
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              <div className="p-3 rounded-xl bg-surface-container flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-primary-container mt-1.5 shrink-0" />
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-label-md text-label-md text-on-surface font-semibold">Volume Auto-Deload</span>
-                    <span className="font-code-stat text-code-stat text-on-surface-variant">Yesterday</span>
-                  </div>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant">
-                    Reduced working squat sets from 5 to 3 due to barbell velocity degradation.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-surface-container flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-secondary mt-1.5 shrink-0" />
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-label-md text-label-md text-on-surface font-semibold">Rotator Cuff Micro-Protocol</span>
-                    <span className="font-code-stat text-code-stat text-on-surface-variant">3 days ago</span>
-                  </div>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant">
-                    Injected face-pulls &amp; Y-raises into Push B session following mild shoulder impingement signals.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
+      <div className="z-10 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
+        <div className="flex justify-center"><span className="rounded-full bg-surface-container px-3 py-1 text-center text-xs text-on-surface-variant">{conversationId ? 'Conversation restored' : `New session · ${nowLabel()}`} · {syncedAt ? `Telemetry synced ${syncedAt}` : 'No wearable telemetry connected'}</span></div>
+        {!messages.length && <div className="mx-auto mt-10 max-w-xl rounded-2xl bg-surface-container p-6 text-center"><span className="material-symbols-outlined text-4xl text-tertiary">neurology</span><h2 className="mt-3 text-xl font-semibold text-on-surface">How can I help with your training?</h2><p className="mt-2 text-sm text-on-surface-variant">Ask about workout planning, exercise technique, recovery, or nutrition. Your profile and latest wearable readings are included when available.</p></div>}
+        {messages.map(message => <MessageBubble key={message.localId} message={message} userName={user?.display_name || 'You'} onOpenPlanner={() => navigate('/workout/recommend')} onCustomizeRoutine={routine => submitMessage(`Please customize this routine for me:\n${routine}`)} />)}
+        {sendMessage.isPending && <div className="flex items-center gap-3 text-sm text-on-surface-variant" role="status"><span className="h-2 w-2 animate-pulse rounded-full bg-tertiary" />Coach is thinking…</div>}
+        <div ref={bottomRef} />
       </div>
-    </div>
-  )
+
+      <footer className="z-10 flex flex-col gap-3 border-t border-surface-container-high/40 bg-surface-container/95 p-4 backdrop-blur-xl">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1"><span className="shrink-0 text-xs uppercase tracking-wider text-on-surface-variant">Quick prompts:</span>{quickPrompts.map(item => <button key={item.label} type="button" disabled={sendMessage.isPending} onClick={() => submitMessage(item.prompt)} className="shrink-0 rounded-full bg-surface-container-high px-3 py-1.5 text-xs text-on-surface hover:bg-surface-container-highest disabled:opacity-50">{item.label}</button>)}</div>
+        {attachedName && <div className="flex items-center justify-between rounded-lg bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant"><span>Draft attachment: {attachedName}</span><button type="button" onClick={() => { setAttachedName(''); setInput(current => current.replace(/\n?\[Attached [^\]]+\]\n[\s\S]*$/, '')) }} aria-label="Remove attachment" className="text-error">Remove</button></div>}
+        <form className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); submitMessage() }}>
+          <div className="relative flex min-w-0 flex-1 items-center"><input ref={fileInputRef} type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" className="hidden" onChange={event => { void attachTextFile(event.target.files?.[0]); event.currentTarget.value = '' }} /><button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach telemetry text or CSV" title="Attach text, CSV, or JSON telemetry" className="absolute left-2 rounded-lg p-1.5 text-on-surface-variant hover:text-primary"><span className="material-symbols-outlined">attach_file</span></button><input value={input} onChange={event => setInput(event.target.value)} aria-label="Message Coach FitGenius" placeholder="Ask Coach FitGenius anything…" maxLength={4000} className="w-full rounded-xl bg-surface-container-high py-3 pl-11 pr-12 text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container" /><button type="button" disabled={!voice.isSupported} onClick={voice.toggleListening} aria-label={voice.isListening ? 'Stop voice input' : 'Use voice input'} aria-pressed={voice.isListening} title={voice.isSupported ? voice.isListening ? 'Stop voice input' : 'Voice input' : 'Voice input is not supported in this browser'} className={`absolute right-2 rounded-lg p-1.5 ${voice.isListening ? 'animate-pulse text-error' : 'text-on-surface-variant hover:text-tertiary'} disabled:opacity-40`}><span className="material-symbols-outlined">{voice.isListening ? 'mic_off' : 'mic'}</span></button></div>
+          <button type="submit" disabled={!input.trim() || sendMessage.isPending} aria-label="Send message" className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary-container text-on-primary-container shadow-[0_0_20px_rgba(0,240,255,0.3)] disabled:cursor-not-allowed disabled:opacity-40"><span className="material-symbols-outlined text-2xl">arrow_upward</span></button>
+        </form>
+        <p className="text-[11px] text-on-surface-variant">Wellness coaching only — not medical advice. For pain, injury, or medical concerns, consult a qualified health professional.</p>
+      </footer>
+    </section>
+
+    <aside className="col-span-12 flex flex-col gap-4 xl:col-span-4">
+      <section className="rounded-2xl bg-surface-container-low p-5 shadow-lg">
+        <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold text-on-surface">{user?.display_name || 'Athlete'}</h2><p className="text-sm capitalize text-on-surface-variant">{profile.data?.fitness_level ?? 'Fitness profile'} · {(profile.data?.primary_goal ?? 'goal not set').replace(/_/g, ' ')}</p></div><span className="material-symbols-outlined text-secondary">account_circle</span></div>
+        <div className="mt-4 grid grid-cols-3 gap-2">{[["Age", profile.data?.age ? `${profile.data.age}` : '—'], ['Weight', profile.data?.weight_kg ? `${profile.data.weight_kg} kg` : '—'], ['Height', profile.data?.height_cm ? `${profile.data.height_cm} cm` : '—']].map(([label, value]) => <div key={label} className="rounded-xl bg-surface-container p-3"><p className="text-[10px] uppercase text-on-surface-variant">{label}</p><p className="mt-1 text-sm font-semibold text-on-surface">{value}</p></div>)}</div>
+        <p className="mt-3 text-xs text-on-surface-variant">{profile.data?.preferred_duration_minutes ? `${profile.data.preferred_duration_minutes} min preferred sessions` : 'Complete your fitness profile for more tailored coaching.'}</p>
+      </section>
+
+      <section className="rounded-2xl bg-surface-container-low p-5 shadow-lg">
+        <div className="flex items-center justify-between"><h2 className="font-semibold uppercase tracking-wide text-on-surface">Recovery & strain</h2><span className={`text-xs font-semibold ${displayFatigue === 'RECOVERY' ? 'text-error' : displayFatigue === 'REDUCED' ? 'text-tertiary-fixed-dim' : 'text-secondary'}`}>{displayFatigue ?? 'NO DATA'}</span></div>
+        {fatigue.data?.recommendation_note ? <p className="mt-3 text-sm text-on-surface-variant">{fatigue.data.recommendation_note}</p> : <p className="mt-3 text-sm text-on-surface-variant">No recovery assessment yet. Add a wearable reading to personalize training suggestions.</p>}
+        {fatigue.data?.disclaimer && <p className="mt-2 text-xs text-on-surface-variant">{fatigue.data.disclaimer}</p>}
+        {fatigue.data?.fatigue_confidence != null && <div className="mt-4"><div className="flex justify-between text-xs text-on-surface-variant"><span>Assessment confidence</span><span>{Math.round(fatigue.data.fatigue_confidence * 100)}%</span></div><div className="mt-1 h-2 overflow-hidden rounded-full bg-surface-container-high"><div className="h-full rounded-full bg-secondary" style={{ width: `${Math.max(0, Math.min(100, fatigue.data.fatigue_confidence * 100))}%` }} /></div></div>}
+      </section>
+
+      <section className="rounded-2xl bg-surface-container-low p-5 shadow-lg"><div className="flex items-center justify-between"><h2 className="font-semibold uppercase tracking-wide text-on-surface">Wearable vitals</h2><span className={`h-2 w-2 rounded-full ${wearable.data ? 'bg-secondary' : 'bg-on-surface-variant'}`} /></div>{wearable.data ? <div className="mt-3 grid grid-cols-2 gap-3"><Vital label="Resting HR" value={wearable.data.resting_heart_rate} unit="bpm" icon="favorite" /><Vital label="HRV" value={wearable.data.hrv_ms} unit="ms" icon="ecg_heart" /><Vital label="Sleep" value={wearable.data.sleep_hours} unit="h" icon="bedtime" /><Vital label="Recovery" value={wearable.data.recovery_score} unit="/100" icon="monitor_heart" /></div> : <p className="mt-3 text-sm text-on-surface-variant">No wearable data is connected. The coach will use your profile and workout history instead.</p>}{syncedAt && <p className="mt-3 text-xs text-on-surface-variant">Latest reading: {syncedAt} · {wearable.data?.source}</p>}</section>
+
+      <section className="rounded-2xl bg-surface-container-low p-5 shadow-lg"><div className="flex items-center justify-between"><h2 className="font-semibold uppercase tracking-wide text-on-surface">Recent training</h2><span className="text-xs text-on-surface-variant">Last 3 sessions</span></div>{workoutHistory.isLoading ? <p className="mt-3 text-sm text-on-surface-variant">Loading workout history…</p> : workoutHistory.data?.length ? <ul className="mt-3 divide-y divide-outline-variant/30">{workoutHistory.data.map((workout: { id: string; name: string; completed_at?: string | null; duration_seconds?: number | null; total_volume_kg: number }) => <li key={workout.id} className="py-3"><p className="font-medium text-on-surface">{workout.name}</p><p className="mt-1 text-xs text-on-surface-variant">{workout.completed_at ? new Date(workout.completed_at).toLocaleDateString() : 'In progress'} · {workout.duration_seconds ? `${Math.round(workout.duration_seconds / 60)} min` : 'duration unavailable'} · {Math.round(workout.total_volume_kg)} kg volume</p></li>)}</ul> : <p className="mt-3 text-sm text-on-surface-variant">Completed sessions will appear here to inform your coaching.</p>}</section>
+
+      <section className="rounded-2xl bg-surface-container-low p-5 shadow-lg"><div className="flex items-center justify-between"><h2 className="font-semibold uppercase tracking-wide text-on-surface">Coach engine</h2><span className="rounded-full bg-surface-container-high px-2 py-1 text-xs text-primary">{engine.data?.status ?? 'checking'}</span></div><p className="mt-2 text-sm text-on-surface-variant">{engine.data?.description ?? (engine.isError ? 'Engine status unavailable.' : 'Checking configured provider…')}</p><button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ['coach-engine'] })} className="mt-3 text-xs font-semibold text-primary underline">Check engine status</button></section>
+    </aside>
+
+    {historyOpen && <div className="fixed inset-0 z-50 flex justify-end bg-background/70" onMouseDown={event => { if (event.target === event.currentTarget) setHistoryOpen(false) }}><section role="dialog" aria-modal="true" aria-label="Conversation history" className="flex h-full w-full max-w-md flex-col bg-surface-container-low p-5 shadow-2xl"><header className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-on-surface">Conversation history</h2><p className="text-sm text-on-surface-variant">Your saved coaching chats</p></div><button type="button" aria-label="Close history" onClick={() => setHistoryOpen(false)} className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high"><span className="material-symbols-outlined">close</span></button></header><button type="button" onClick={startNewConversation} className="mt-5 rounded-lg bg-primary-container px-4 py-3 font-bold text-on-primary-container">Start a new chat</button><div className="mt-4 flex-1 overflow-y-auto">{conversations.isLoading ? <p className="text-sm text-on-surface-variant">Loading conversations…</p> : conversations.data?.length ? conversations.data.map(item => <div key={item.id} className={`mb-2 flex items-center gap-2 rounded-xl p-3 ${conversationId === item.id ? 'bg-primary-container/10' : 'bg-surface-container'}`}><button type="button" disabled={selectingConversation} onClick={() => void selectConversation(item)} className="min-w-0 flex-1 text-left disabled:opacity-50"><p className="truncate font-medium text-on-surface">{item.title}</p><p className="mt-1 text-xs text-on-surface-variant">{item.message_count} messages · {item.last_message_at ? new Date(item.last_message_at).toLocaleDateString() : 'Not sent'}</p></button><button type="button" disabled={deleteConversation.isPending} aria-label={`Delete conversation ${item.title}`} onClick={() => deleteConversation.mutate(item.id)} className="rounded-lg p-2 text-on-surface-variant hover:bg-error-container/20 hover:text-error"><span className="material-symbols-outlined text-lg">delete</span></button></div>) : <p className="mt-5 text-sm text-on-surface-variant">No saved conversations yet.</p>}</div></section></div>}
+
+    {telemetryOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4" onMouseDown={event => { if (event.target === event.currentTarget) setTelemetryOpen(false) }}><section role="dialog" aria-modal="true" aria-label="Session telemetry" className="w-full max-w-lg rounded-2xl bg-surface-container-low p-5 shadow-2xl"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-on-surface">Session telemetry</h2><button type="button" aria-label="Close telemetry" onClick={() => setTelemetryOpen(false)} className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high"><span className="material-symbols-outlined">close</span></button></div><p className="mt-1 text-sm text-on-surface-variant">Most recent values available to Coach FitGenius.</p>{wearable.data ? <dl className="mt-4 grid grid-cols-2 gap-3">{[['Source', wearable.data.source], ['Recorded', syncedAt ?? '—'], ['Resting heart rate', wearable.data.resting_heart_rate != null ? `${wearable.data.resting_heart_rate} bpm` : '—'], ['HRV', wearable.data.hrv_ms != null ? `${wearable.data.hrv_ms} ms` : '—'], ['Sleep', wearable.data.sleep_hours != null ? `${wearable.data.sleep_hours} hours` : '—'], ['Recovery', wearable.data.recovery_score != null ? `${wearable.data.recovery_score}/100` : '—'], ['Fatigue', fatigue.data?.fatigue_level ?? '—'], ['Recent workout', latestWorkout?.name ?? 'None recorded']].map(([label, value]) => <div key={label} className="rounded-lg bg-surface-container p-3"><dt className="text-xs text-on-surface-variant">{label}</dt><dd className="mt-1 text-sm font-semibold text-on-surface">{value}</dd></div>)}</dl> : <p className="mt-4 rounded-lg bg-surface-container p-4 text-sm text-on-surface-variant">No wearable telemetry is available yet. Connect or manually add data in Wearables.</p>}<button type="button" onClick={() => { setTelemetryOpen(false); navigate('/wearables') }} className="mt-4 rounded-lg bg-surface-container-high px-4 py-2 font-semibold text-on-surface">Open wearable settings</button></section></div>}
+  </main>
+}
+
+function MessageBubble({ message, userName, onOpenPlanner, onCustomizeRoutine }: { message: Message; userName: string; onOpenPlanner: () => void; onCustomizeRoutine: (routine: string) => void }) {
+  if (message.role === 'user') return <div className="flex justify-end gap-3 pl-8 sm:pl-12"><div className="flex max-w-xl flex-col items-end gap-1.5"><div className="flex items-baseline gap-2"><span className="text-xs text-on-surface-variant">{message.ts}</span><span className="text-sm font-semibold text-primary">{userName}</span></div><div className="whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-surface-container-high p-4 text-on-surface shadow">{message.content}</div></div><div aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-container/15 text-xs font-bold text-primary">{userName.slice(0, 1).toUpperCase()}</div></div>
+  const routineLines = message.content.split('\n').filter(line => /\b\d+\s*(?:sets?\s*[×x]\s*\d+|sets?\s*(?:of\s*)?\d+\s*reps?)\b/i.test(line))
+  return <div className="flex max-w-3xl items-start gap-3.5"><div aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-tertiary-container/20 text-tertiary"><span className="material-symbols-outlined text-base">neurology</span></div><div className="w-full"><div className="mb-1.5 flex items-baseline gap-2"><span className="text-sm font-semibold text-tertiary">FitGenius Bio-Core</span><span className="text-xs text-on-surface-variant">{message.ts}</span></div><div className="rounded-2xl rounded-tl-sm bg-surface-container p-4 text-on-surface shadow"><div className="prose-coach"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>, strong: ({ children }) => <strong className="font-semibold text-on-surface">{children}</strong>, h2: ({ children }) => <h2 className="mb-1 mt-3 text-lg font-semibold text-on-surface">{children}</h2>, h3: ({ children }) => <h3 className="mb-1 mt-2 font-semibold text-on-surface">{children}</h3>, ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>, ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>, li: ({ children }) => <li className="leading-relaxed">{children}</li>, blockquote: ({ children }) => <blockquote className="my-2 border-l-2 border-primary-container pl-3 italic text-on-surface-variant">{children}</blockquote>, code: ({ children }) => <code className="rounded bg-surface-container-high px-1.5 py-0.5 text-primary">{children}</code> }}>{message.content}</ReactMarkdown></div></div>{routineLines.length > 0 ? <div className="mt-3 rounded-xl bg-surface-container-high p-4"><div className="flex items-center gap-2"><span className="material-symbols-outlined text-secondary">healing</span><h3 className="font-semibold text-on-surface">Routine from this coaching reply</h3></div><ul className="mt-2 space-y-2">{routineLines.map((line, index) => <li key={`${index}-${line}`} className="rounded-lg bg-surface-container/70 p-3 text-sm text-on-surface">{line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').replace(/\*\*/g, '')}</li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => onCustomizeRoutine(routineLines.join('\n'))} className="rounded-lg bg-surface-container px-3 py-2 text-sm font-semibold text-on-surface">Customize with Coach</button><button type="button" onClick={onOpenPlanner} className="rounded-lg bg-primary-container px-3 py-2 text-sm font-bold text-on-primary-container">Open workout planner</button></div></div> : null}</div></div>
+}
+
+function Vital({ label, value, unit, icon }: { label: string; value?: number | null; unit: string; icon: string }) {
+  return <div className="rounded-xl bg-surface-container p-3"><div className="flex items-center justify-between text-on-surface-variant"><span className="text-[10px] uppercase">{label}</span><span className="material-symbols-outlined text-base">{icon}</span></div><p className="mt-2 text-xl font-bold text-on-surface">{value == null ? '—' : Number.isInteger(value) ? value : value.toFixed(1)}<span className="ml-1 text-xs font-normal text-on-surface-variant">{unit}</span></p></div>
 }

@@ -407,7 +407,7 @@ export default function ProgressPage() {
           </div>
 
           <p className="text-body-md text-body-md text-on-surface leading-relaxed text-sm">
-            &ldquo;Alex, your 30-day kinetic tonnage has surged <strong className="text-secondary">+12.4%</strong> while hamstring motor unit recovery has dipped to 64%. Your neuromuscular fatigue index suggests initiating a 4-day active deload protocol on Monday to maximize supercompensation.&rdquo;
+            &ldquo;Parth, your 30-day kinetic tonnage has surged <strong className="text-secondary">+12.4%</strong> while hamstring motor unit recovery has dipped to 64%. Your neuromuscular fatigue index suggests initiating a 4-day active deload protocol on Monday to maximize supercompensation.&rdquo;
           </p>
 
           <div className="p-3.5 rounded-xl bg-surface-container border border-outline-variant/20 flex flex-col gap-1">

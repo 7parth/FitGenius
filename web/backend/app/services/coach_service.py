@@ -137,20 +137,23 @@ def get_engine_status() -> dict[str, Any]:
 
     if has_groq:
         provider = "Groq LPU Acceleration"
+        model = settings.GROQ_MODEL
         status = "active"
         description = f"Ultra-low latency inference via LangChain Groq ({settings.GROQ_MODEL})"
     elif has_openai:
         provider = "OpenAI"
+        model = settings.OPENAI_MODEL
         status = "active"
         description = f"Cloud inference via OpenAI ({settings.OPENAI_MODEL})"
     else:
         provider = "LangChain Groq Ready"
+        model = settings.GROQ_MODEL
         status = "ready"
         description = f"LangChain Groq integration ready. Add GROQ_API_KEY in web/.env to stream live {settings.GROQ_MODEL}."
 
     return {
         "provider": provider,
-        "model": settings.GROQ_MODEL,
+        "model": model,
         "framework": "LangChain",
         "status": status,
         "active": has_groq or has_openai,

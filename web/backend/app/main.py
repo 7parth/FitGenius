@@ -47,8 +47,8 @@ async def lifespan(application: "FastAPI"):
         if settings.ENVIRONMENT == "production":
             raise RuntimeError("SECRET_KEY must be changed from default in production!")
         warnings.append("SECRET_KEY is using a default value — change before deploying")
-    if not settings.OPENAI_API_KEY and settings.ENVIRONMENT == "production":
-        warnings.append("OPENAI_API_KEY not set — AI Coach will use fallback responses")
+    if not settings.GROQ_API_KEY and not settings.OPENAI_API_KEY and settings.ENVIRONMENT == "production":
+        warnings.append("Neither GROQ_API_KEY nor OPENAI_API_KEY is set — AI Coach will use simulated responses")
     for w in warnings:
         logger.warning("⚠️  CONFIG: %s", w)
     logger.info("✅ FitGenius API v%s starting in %s mode", settings.APP_VERSION, settings.ENVIRONMENT)
@@ -161,4 +161,3 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "An internal server error occurred."},
     )
-

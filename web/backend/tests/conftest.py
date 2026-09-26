@@ -15,6 +15,7 @@ os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("OPENAI_API_KEY", "")
+os.environ.setdefault("GROQ_API_KEY", "")
 
 import pytest
 from fastapi.testclient import TestClient
