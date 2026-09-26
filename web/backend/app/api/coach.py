@@ -11,10 +11,17 @@ from app.schemas.coach import (
     ConversationSummary,
     ConversationDetailResponse,
     CoachMessage,
+    CoachEngineInfo,
 )
-from app.services.coach_service import get_coach_reply
+from app.services.coach_service import get_coach_reply, get_engine_status
 
 router = APIRouter()
+
+
+@router.get("/engine", response_model=CoachEngineInfo)
+async def get_coach_engine_info():
+    """Return runtime configuration and status of the AI Coach engine."""
+    return get_engine_status()
 
 
 @router.post("/message", response_model=SendMessageResponse)
@@ -49,8 +56,8 @@ async def send_message(
     messages = list(conv.messages)
     messages.append({"role": "user", "content": body.content, "ts": now_iso})
 
-    # Get AI reply (OpenAI — key server-side only)
-    reply_text, prompt_tokens, completion_tokens = await get_coach_reply(
+    # Get AI reply (LangChain Groq — keys server-side only)
+    reply_text, prompt_tokens, completion_tokens, engine_info = await get_coach_reply(
         messages=messages,
         user=current_user,
         db=db,
@@ -76,6 +83,8 @@ async def send_message(
         conversation_id=conv.id,
         reply=reply_text,
         conversation_title=conv.title,
+        engine=engine_info.get("provider", "LangChain + Groq"),
+        model=engine_info.get("model", "llama-3.3-70b-versatile"),
     )
 
 
@@ -84,7 +93,7 @@ async def list_conversations(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    return (
+    rows = (
         db.query(AIConversation)
         .filter(
             AIConversation.user_id == current_user.id,
@@ -93,6 +102,16 @@ async def list_conversations(
         .order_by(AIConversation.last_message_at.desc())
         .all()
     )
+    return [
+        ConversationSummary(
+            id=row.id,
+            title=row.title,
+            message_count=row.message_count,
+            last_message_at=row.last_message_at,
+            created_at=row.created_at.isoformat() if row.created_at else "",
+        )
+        for row in rows
+    ]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)

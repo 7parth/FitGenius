@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '@/lib/api'
 import { useVoice } from '@/hooks/useVoice'
 import { toast } from '@/components/ui/Toast'
@@ -192,8 +194,35 @@ export default function CoachPage() {
                         <span className="font-label-md text-label-md text-tertiary font-semibold">FitGenius Bio-Core</span>
                         <span className="font-code-stat text-code-stat text-on-surface-variant">{msg.ts}</span>
                       </div>
-                      <div className="p-4 rounded-2xl rounded-tl-sm bg-surface-container text-on-surface shadow-[0_2px_12px_rgba(0,0,0,0.3)] leading-relaxed">
-                        {msg.content}
+                      <div className="p-4 rounded-2xl rounded-tl-sm bg-surface-container text-on-surface shadow-[0_2px_12px_rgba(0,0,0,0.3)] leading-relaxed prose-coach">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            p: ({ children }) => <p className="mb-2 last:mb-0 font-body-md text-body-md leading-relaxed">{children}</p>,
+                            strong: ({ children }) => <strong className="font-semibold text-on-surface">{children}</strong>,
+                            em: ({ children }) => <em className="italic text-on-surface-variant">{children}</em>,
+                            h1: ({ children }) => <h1 className="font-headline-sm text-headline-sm text-on-surface font-bold mt-3 mb-1">{children}</h1>,
+                            h2: ({ children }) => <h2 className="font-title-md text-on-surface font-semibold mt-2.5 mb-1">{children}</h2>,
+                            h3: ({ children }) => <h3 className="font-label-lg text-on-surface font-semibold mt-2 mb-0.5">{children}</h3>,
+                            ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2 text-on-surface">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2 text-on-surface">{children}</ol>,
+                            li: ({ children }) => <li className="font-body-md text-body-md leading-relaxed">{children}</li>,
+                            blockquote: ({ children }) => (
+                              <blockquote className="border-l-2 border-primary-container pl-3 my-2 text-on-surface-variant italic">{children}</blockquote>
+                            ),
+                            code: ({ inline, children }: any) =>
+                              inline ? (
+                                <code className="px-1.5 py-0.5 rounded bg-surface-container-high text-primary font-code-stat text-code-stat">{children}</code>
+                              ) : (
+                                <pre className="my-2 p-3 rounded-xl bg-surface-container-high overflow-x-auto">
+                                  <code className="font-code-stat text-code-stat text-on-surface">{children}</code>
+                                </pre>
+                              ),
+                            hr: () => <hr className="my-3 border-surface-container-high" />,
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
                       </div>
 
                       {/* Interactive Routine Card (if present on assistant message) */}

@@ -27,7 +27,11 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
-    # OpenAI — server-side ONLY, never expose to frontend
+    # Groq / LangChain — server-side ONLY, never expose to frontend
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    # OpenAI fallback — server-side ONLY, never expose to frontend
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
 

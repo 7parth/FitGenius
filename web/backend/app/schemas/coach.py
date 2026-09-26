@@ -17,6 +17,17 @@ class SendMessageResponse(BaseModel):
     conversation_id: str
     reply: str
     conversation_title: str
+    engine: Optional[str] = "LangChain + Groq"
+    model: Optional[str] = "llama-3.3-70b-versatile"
+
+
+class CoachEngineInfo(BaseModel):
+    provider: str
+    model: str
+    status: str
+    framework: str = "LangChain"
+    active: bool
+    description: str
 
 
 class ConversationSummary(BaseModel):
