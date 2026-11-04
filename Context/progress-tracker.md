@@ -2,15 +2,15 @@
 
 ## Architecture
 
-- Stack: React + TypeScript + Tailwind + Vite (web frontend) | FastAPI + Python + SQLAlchemy (web backend) | Supabase PostgreSQL + Redis | Expo/React Native mobile app
+- Stack: React + TypeScript + Tailwind + Vite (web frontend) | FastAPI + Python + SQLAlchemy (web backend) | Supabase PostgreSQL | Expo/React Native mobile app (deferred)
 - Root: `/Users/7parth/Developer/Projects/FitGenius/web/`
 - Frontend: `web/frontend/` | Backend: `web/backend/` | Docker: `web/`
-- Expo/React Native app in `fitgenius/` — separate client; coordinate shared auth/schema changes across both apps
+- Expo/React Native app in `fitgenius/` — deferred; do not implement or modify mobile features until the user explicitly instructs. Current scope is the web application only.
 - Git Remote: `https://github.com/7parth/FitGenius.git` (branch: `master`)
 
 ---
 
-## Overall Status: Web platform and post-launch features through Feature 22 complete; web backend migrated to Supabase. Cross-app Supabase integration and mobile production readiness remain next goals.
+## Overall Status: Web platform and post-launch features through Feature 22 complete; web runtime uses Supabase PostgreSQL only. Current focus: finish, verify, and prepare the web application for production. Mobile work is explicitly deferred until instructed by the user.
 
 ### Core 17-Task Plan:
 
@@ -127,11 +127,12 @@
 
 ### Supabase Database Migration — Web Backend (2026-11-04)
 - **Connection**: `web/.env` now uses the Supabase IPv4 session pooler; credentials remain local and ignored by Git. Direct database DNS resolved to IPv6-only, so use the Supabase session pooler for IPv4-only environments.
-- **Compose/config**: Docker Compose honors `DATABASE_URL`; `web/.env.example` documents direct and pooler URL formats. Alembic escapes percent-encoded URL credentials before ConfigParser interpolation.
-- **Remote schema**: Alembic revisions `001`–`003` applied and verified at `003 (head)`. Seeded 44 exercises, 10 achievements, and 15 workout templates.
+- **Compose/config**: Docker Compose honors required `DATABASE_URL`; the local PostgreSQL service, volume, port, and backend dependency have been removed. Runtime config has no localhost database default. `web/.env.example` requires a Supabase pooler URI. Alembic escapes percent-encoded URL credentials before ConfigParser interpolation.
+- **Remote schema**: Alembic revisions `001`–`003` applied and verified at `003 (head)` at the time of initial migration. Seeded 44 exercises, 10 achievements, and 15 workout templates.
+- **Runtime dependencies**: Redis has been removed. Recommendations and exercise listings read from Supabase PostgreSQL; leaderboards use persisted gamification rows; refresh-token revocation is persisted as hashes in `revoked_refresh_tokens` (migration `004`). Revision `004` is now applied to Supabase.
 - **Data**: The Supabase database was empty before migration. No existing local user/workout data was transferred; only schema migrations and reference/catalog seed data were applied.
 - **Important integration gap**: The web backend's custom-JWT schema is not the Expo app's schema. The Expo client expects Supabase Auth-backed `profiles`, `workouts`, and `workout_sets`, while the web migration created its own `users`, `user_profiles`, workout/session tables, and an incompatible `exercises` table. Do not apply `fitgenius/supabase/schema.sql` unchanged to this database.
-- **Verification**: Remote Alembic revision and catalog counts verified. Local backend suite in this environment: 78 passed, 17 failed because Redis was not running; Docker was unavailable locally.
+- **Verification**: Remote Alembic revision `004` verified. Backend suite after Redis removal: 96 passed. Both Compose files parse and contain no local PostgreSQL or Redis runtime services; Docker CLI is unavailable in this environment.
 
 ---
 
@@ -221,9 +222,9 @@
 3. **Disability info = user preference, not medical diagnosis** — careful and respectful language throughout.
 4. **No dangerouslySetInnerHTML** anywhere — XSS prevention.
 5. **All DB queries via SQLAlchemy ORM** — no raw SQL string interpolation.
-6. **Redis used for**: leaderboard sorted sets (ZADD/ZREVRANGE), recommendation cache (30min TTL), token blacklist (logout), rate limit counters.
+6. **Supabase PostgreSQL is the only web persistence service**: application records, leaderboard state, and refresh-token revocation use SQLAlchemy/Alembic. Exercise/recommendation caching was removed; rate limiting is process-local via SlowAPI. No Redis service is used.
 7. **Alembic only for schema changes** — no manual ALTER TABLE.
-8. **Expo `fitgenius/` directory**: treat as a separate app, but coordinate shared data, auth, secrets, and release changes with the web app.
+8. **Web-first scope**: work only on `web/` and shared web documentation/configuration until the user explicitly authorizes mobile-app work. The Expo `fitgenius/` app is deferred.
 9. **WCAG 2.1 AA**: min 4.5:1 contrast, visible focus rings (2px outline), no color-only encoding, keyboard navigable, ARIA live regions for dynamic content.
 10. **Gamification points formula**: `base(difficulty) × duration_multiplier × streak_multiplier`.
 11. **Recommendation stages**: Stage 1 = rule-based (cold start), Stage 2 = content-based (3+ sessions), Stage 3 = ML hybrid (20+ sessions).
@@ -235,27 +236,39 @@
 
 ---
 
-## Next Goals — Project Review (Prioritized)
+## Next Goals — Web Application First (Prioritized)
 
-### Goal 1 — Unify Supabase Auth and Data Across Web + Mobile (P0)
-- Decide on one supported identity model: migrate web auth to Supabase Auth or provide a deliberate, secure bridge between the web JWT users and `auth.users` used by Expo.
-- Reconcile the incompatible web and mobile table contracts, especially `exercises`, profiles, and workout history. Produce a canonical schema and versioned Alembic/Supabase migrations; do not apply the existing mobile SQL file wholesale because it conflicts with the live web schema.
-- Add the Expo app's required Supabase URL and anon/publishable key through local/deployment secrets, then verify registration, login, onboarding, profile load/update, workout save, and history against Supabase with per-user RLS tests.
-- Confirm whether a legacy local database contains records; if so, export/import user-owned data with ID/FK mapping and row-count checks before retiring it.
+**Scope rule:** implement the web application only. Do not start mobile-app features, Expo CI, or web/mobile auth/schema unification until the user explicitly asks to resume the app. Keep the known mobile integration issues documented under the deferred work section below.
 
-### Goal 2 — Remove Client-Exposed AI Secrets and Complete Mobile Runtime Configuration (P1)
-- Remove `EXPO_PUBLIC_OPENAI_API_KEY` from mobile configuration and route AI requests through an authenticated server-side API/Edge Function with rate limits and usage/error handling.
-- Add validated environment setup and startup diagnostics for both apps. Never put service-role or provider keys in Expo `EXPO_PUBLIC_*` variables.
-- Verify the mobile app builds and can complete its primary Supabase flows using only public client credentials.
+### Goal 1 — Make the Web Supabase Deployment Repeatable and Safe (P0)
+- Keep the FastAPI/SQLAlchemy web data model and custom JWT auth as the active web contract for now; the backend targets Supabase PostgreSQL and is at Alembic revision `004`.
+- [x] Enforce Supabase PostgreSQL as the only web runtime database: require `DATABASE_URL`, remove local Postgres from Compose, and remove local connection defaults from the environment template.
+- Keep Supabase PostgreSQL as the sole web persistence service. CI may use an isolated disposable PostgreSQL service for migration/integration tests; it is not an application runtime database.
+- Document and validate all runtime settings (`DATABASE_URL`, SSL/pooler URL, `SECRET_KEY`, CORS, AI provider keys) without printing secrets. Ensure the remote Supabase password is rotated if the supplied credential is no longer private.
+- Make schema upgrades an explicit, observable release step; verify Alembic head before and after deployment and test restore/backup procedures before using production data.
+- Establish whether the former local database has user data. If it does, plan a separate, reversible export/import with FK/ID mapping, row counts, and post-import checks; current Supabase migration seeded catalog records only.
 
-### Goal 3 — Replace Simulated Mobile Pose Tracking (P1)
-- `fitgenius/app/ai/camera.tsx` currently animates a simulated joint angle and generated form score while showing a live camera preview; it does not analyze camera landmarks.
-- Implement real on-device pose estimation and exercise-specific rep/form evaluation, handle permissions/device performance safely, and persist session results to the canonical workout schema.
-- Add meaningful tests for rep-state transitions and validation; clearly label any unsupported or estimated metrics.
+### Goal 2 — Verify Critical Web User Journeys End to End (P0)
+- Exercise the full web journey against the Supabase-backed API: register/login/refresh/logout, profile/onboarding, browse/search exercises, generate recommendation, start/log/complete workout, nutrition goals/logging, coach conversation, pose set/history, notifications, and personal-data export.
+- For each journey, verify authenticated ownership, validation failures, loading/empty/error/success UI states, and persisted results after reload. Add regression tests for uncovered API/UI paths.
+- Review generated dashboards and gamification/leaderboard views for any remaining placeholder metrics or hard-coded demo identities; display only persisted data or clearly labeled empty states.
+- Keep local dev/test data isolated from Supabase production data and add a documented demo-seed procedure for non-production environments.
 
-### Goal 4 — Make CI Cover the Actual Repository and Deployment Topology (P1)
-- Align GitHub Actions branch filters with the repository's active default branch (`master` per tracker/remote history) and ensure changes outside `web/**` trigger checks.
-- Add Expo lint/typecheck/doctor/build checks and mobile tests; retain backend PostgreSQL + Redis integration tests and add API-to-database smoke coverage.
-- `web/README.md` is currently empty; document local setup, Supabase/pooler configuration, migrations/seeding, CI checks, and production deployment.
-- Update production Compose so a Supabase `DATABASE_URL` does not require booting/depending on an unused local PostgreSQL service. Keep Redis requirements explicit and verify production migrations, health checks, and secret injection in a deployment smoke test.
-- Re-run the complete backend, frontend, E2E, and mobile checks and replace the historical verification table with current results.
+### Goal 3 — Strengthen Web Security, Privacy, and Accessibility (P1)
+- Audit auth/session storage, refresh-token rotation, logout revocation, password rules, rate limiting, CORS, admin authorization, and production error responses. Confirm no provider/service credentials are delivered to the browser.
+- Verify account data ownership across all SQLAlchemy queries and add negative tests for cross-user access, especially exports, workouts, nutrition, notifications, conversations, and wearables.
+- Review personal-data export and account lifecycle requirements; add account deletion/data-retention behavior if it is not already implemented.
+- Run a keyboard/screen-reader/contrast review against WCAG 2.1 AA for the actual web workflows and fix accessibility defects discovered.
+
+### Goal 4 — Make Web CI and Release Checks Reliable (P1)
+- Update GitHub Actions branch filters to include the repository's active `master` branch; current workflow listens to `main` and `develop` and only watches `web/**`.
+- Require backend lint/format/type or import checks, migrations, PostgreSQL tests, and frontend typecheck/lint/build plus authenticated runtime E2E coverage (not only public-page smoke tests).
+- Add a deployment smoke test for Supabase connectivity, Alembic head, API health, production CORS/secrets, and the built frontend's API URL.
+- `web/README.md` is empty; document setup, environment variables, local services, Supabase/pooler configuration, migration/seed commands, test commands, deployment, backup/restore, and rollback.
+- Replace the historical verification table with current results after the web checks pass on the active branch.
+
+### Deferred — Expo App (Resume Only When User Instructs)
+- The Expo client expects Supabase Auth-backed `profiles`, `workouts`, and `workout_sets`; these do not match the web backend's custom JWT and current schema. The two `exercises` definitions conflict, so `fitgenius/supabase/schema.sql` must not be applied unchanged to the live database.
+- Mobile camera rep/form analysis is simulated; real on-device pose estimation and persistence remain future work.
+- Review mobile public environment variables and move any provider API keys server-side before using AI features.
+- Once authorized, scope a separate mobile milestone for canonical identity/data design, safe migrations/RLS, environment setup, mobile tests/builds, and real camera tracking. Until then, do not modify the Expo app.

@@ -36,4 +36,4 @@ from .conversation import AIConversation  # noqa: F401
 from .notification import Notification, NotificationType  # noqa: F401
 from .audit import AuditLog, AuditAction  # noqa: F401
 from .nutrition import NutritionLog, UserNutritionGoal, MealType, DietaryPreference  # noqa: F401
-
+from .revoked_token import RevokedRefreshToken  # noqa: F401

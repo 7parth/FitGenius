@@ -45,6 +45,11 @@ def decode_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
 
+def hash_token(token: str) -> str:
+    """Return a one-way digest for storing token revocation state."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def is_valid_password(password: str) -> tuple[bool, str]:
     """Returns (valid, error_message)."""
     if len(password) < 8:

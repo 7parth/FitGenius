@@ -4,7 +4,6 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 from .database import get_db
 from .security import decode_token
-from .redis_client import get_redis
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -28,14 +27,6 @@ def get_current_user(
             raise credentials_exc
     except JWTError:
         raise credentials_exc
-
-    # Check token blacklist — skip gracefully if Redis is unavailable
-    try:
-        redis = get_redis()
-        if redis and redis.exists(f"blacklist:{token}"):
-            raise credentials_exc
-    except Exception:
-        pass  # Redis down: allow request through, blacklist unavailable
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:

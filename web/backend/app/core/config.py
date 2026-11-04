@@ -18,10 +18,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
-    DATABASE_URL: str = "postgresql://fitgenius:fitgenius@localhost:5432/fitgenius"
-
-    # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    # Required: web runtime data is hosted in Supabase PostgreSQL.
+    DATABASE_URL: str
 
     # Auth / JWT
     SECRET_KEY: str = "change-me-in-production-use-long-random-string-here"

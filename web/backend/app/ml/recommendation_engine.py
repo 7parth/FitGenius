@@ -9,33 +9,29 @@ Entry point: get_recommendation(user, db, context_override) → Recommendation (
 
 Design constraints:
 - All DB queries via SQLAlchemy ORM (no raw SQL string interpolation)
-- Redis caches recommendation payload for 30 min (per-user key)
+- Recommendation payloads are persisted in PostgreSQL by the API caller
 - Fatigue level fed in from wearable_service to adjust intensity
 - Accessibility restrictions enforced via exercise_service
 """
 
 from __future__ import annotations
 
-import json
-import random
 import logging
-from datetime import datetime, timezone
+import random
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.user import User
-from app.models.recommendation import Recommendation, RecommendationStage
-from app.models.workout import WorkoutSession, SessionStatus
 from app.models.exercise import Exercise
 from app.models.profile import UserProfile
-from app.core.redis_client import get_redis
+from app.models.recommendation import Recommendation, RecommendationStage
+from app.models.user import User
+from app.models.workout import SessionStatus, WorkoutSession
 from app.services.exercise_service import get_eligible_exercises, get_exercises_for_goal
 from app.services.wearable_service import get_latest_fatigue, fatigue_intensity_modifier
 
 logger = logging.getLogger("fitgenius.ml")
 
-_CACHE_TTL = 1800   # 30 minutes
 _EXERCISES_PER_PLAN = 6
 
 
@@ -50,19 +46,6 @@ def get_recommendation(
     Select the appropriate stage, generate a recommendation, and return an
     unsaved Recommendation ORM object. The caller is responsible for db.add/commit.
     """
-    cache_key = f"rec:{user.id}"
-    redis = get_redis()
-
-    # Try cache
-    if redis and not context_override:
-        cached = redis.get(cache_key)
-        if cached:
-            try:
-                payload = json.loads(cached)
-                return _build_recommendation(user, payload, payload.pop("_stage"), payload.pop("_confidence"), db)
-            except Exception:
-                pass  # cache miss / corrupt — fall through
-
     # Count completed sessions for stage selection
     session_count = (
         db.query(WorkoutSession)
@@ -82,11 +65,6 @@ def get_recommendation(
     else:
         stage = RecommendationStage.rule_based
         payload, confidence = _stage1_rule_based(user, db, context_override)
-
-    # Cache result (without private keys)
-    if redis and not context_override:
-        cache_payload = {**payload, "_stage": stage, "_confidence": confidence}
-        redis.setex(cache_key, _CACHE_TTL, json.dumps(cache_payload, default=str))
 
     return _build_recommendation(user, payload, stage, confidence, db)
 

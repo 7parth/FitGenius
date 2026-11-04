@@ -8,7 +8,6 @@ import os
 
 # Override env vars BEFORE any app code is imported
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("RATE_LIMIT_REGISTER", "1000/minute")
 os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")

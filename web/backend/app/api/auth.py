@@ -1,28 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from jose import JWTError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.deps import get_current_active_user
 from app.core.security import (
-    hash_password,
-    verify_password,
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
+    hash_token,
+    verify_password,
 )
-from app.core.redis_client import get_redis
-from app.core.deps import get_current_active_user
-from app.core.config import settings
-from app.models.user import User, UserRole
-from app.models.profile import UserProfile
 from app.models.gamification import UserGamification
+from app.models.profile import UserProfile
+from app.models.revoked_token import RevokedRefreshToken
+from app.models.user import User, UserRole
 from app.schemas.auth import (
-    RegisterRequest,
     LoginRequest,
-    RefreshRequest,
-    TokenResponse,
     MeResponse,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
 )
 
 router = APIRouter()
@@ -74,11 +78,10 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_tokens(body: RefreshRequest, db: Session = Depends(get_db)):
-    from jose import JWTError
     try:
         payload = decode_token(body.refresh_token)
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        raise HTTPException(status_code=401, detail="Invalid refresh token") from None
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
@@ -87,9 +90,11 @@ async def refresh_tokens(body: RefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
-    # Check if token is blacklisted
-    redis = get_redis()
-    if redis and redis.get(f"blacklist:{body.refresh_token}"):
+    # Refresh-token revocation is persisted in Supabase; only a digest is stored.
+    if db.query(RevokedRefreshToken).filter(
+        RevokedRefreshToken.token_hash == hash_token(body.refresh_token),
+        RevokedRefreshToken.expires_at > datetime.now(UTC),
+    ).first():
         raise HTTPException(status_code=401, detail="Token has been revoked")
 
     access_token = create_access_token({"sub": user.id, "role": user.role})
@@ -98,12 +103,33 @@ async def refresh_tokens(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(body: RefreshRequest, current_user: User = Depends(get_current_active_user)):
-    # Blacklist the refresh token until its natural expiry
-    redis = get_redis()
-    if redis:
-        ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
-        redis.setex(f"blacklist:{body.refresh_token}", ttl, "1")
+async def logout(
+    body: RefreshRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = decode_token(body.refresh_token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token") from None
+
+    if payload.get("type") != "refresh" or payload.get("sub") != current_user.id:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    expires_at = datetime.fromtimestamp(payload["exp"], UTC)
+    token_hash = hash_token(body.refresh_token)
+    revoked = db.get(RevokedRefreshToken, token_hash)
+    if not revoked:
+        db.add(RevokedRefreshToken(
+            token_hash=token_hash,
+            user_id=current_user.id,
+            expires_at=expires_at,
+        ))
+    # Opportunistically prune expired records so the table remains bounded.
+    db.query(RevokedRefreshToken).filter(
+        RevokedRefreshToken.expires_at <= datetime.now(UTC)
+    ).delete(synchronize_session=False)
+    db.commit()
 
 
 @router.get("/me", response_model=MeResponse)

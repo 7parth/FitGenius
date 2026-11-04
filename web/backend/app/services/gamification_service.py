@@ -1,25 +1,20 @@
 """
 Gamification service.
 
-Points formula: base(difficulty) × duration_multiplier × streak_multiplier
-Leaderboard backed by Redis sorted sets (ZADD/ZREVRANGE).
+Points formula: base(difficulty) × duration_multiplier × streak_multiplier.
+Leaderboard data is stored in PostgreSQL.
 """
-from datetime import datetime, timezone, date
+from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 
-from app.models.workout import WorkoutSession
-from app.models.gamification import UserGamification, UserAchievement, Achievement
+from app.models.gamification import Achievement, UserAchievement, UserGamification
 from app.models.user import User
-from app.core.redis_client import get_redis
+from app.models.workout import WorkoutSession
 from app.schemas.gamification import LeaderboardResponse, LeaderboardEntry
 
 # ── Points constants ───────────────────────────────────────────────────────────
 _BASE_POINTS = {"beginner": 50, "intermediate": 100, "advanced": 150}
 _LEVEL_THRESHOLDS = [0, 500, 1500, 3500, 7000, 12000, 20000, 30000, 45000, 65000]
-
-_LEADERBOARD_KEY = "leaderboard:weekly"
-_LEADERBOARD_TTL = 7 * 86400  # 7 days
-
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -67,9 +62,6 @@ def award_session_points(session: WorkoutSession, db: Session) -> int:
 
     db.flush()
 
-    # Push to Redis leaderboard sorted set
-    _push_to_redis_leaderboard(user, gam)
-
     # Check achievements
     _check_achievements(user, gam, session, db)
 
@@ -78,12 +70,9 @@ def award_session_points(session: WorkoutSession, db: Session) -> int:
 
 def compute_leaderboard(current_user_id: str, limit: int, db: Session) -> LeaderboardResponse:
     """
-    Build leaderboard. Prefers Redis sorted set; falls back to Postgres.
+    Build the leaderboard from persisted Supabase PostgreSQL data.
     Always includes the requesting user's rank even if outside top N.
     """
-    redis = get_redis()
-    if redis and redis.exists(_LEADERBOARD_KEY):
-        return _leaderboard_from_redis(current_user_id, limit, db, redis)
     return _leaderboard_from_db(current_user_id, limit, db)
 
 
@@ -125,69 +114,6 @@ def _update_level(gam: UserGamification) -> None:
     # XP toward next level
     current_threshold = _LEVEL_THRESHOLDS[min(gam.level - 1, len(_LEVEL_THRESHOLDS) - 1)]
     gam.xp_toward_next_level = gam.total_points - current_threshold
-
-
-def _push_to_redis_leaderboard(user: User, gam: UserGamification) -> None:
-    redis = get_redis()
-    if not redis:
-        return
-    # Store as "display_name|user_id" → never expose email
-    member = f"{user.display_name}|{user.id}"
-    redis.zadd(_LEADERBOARD_KEY, {member: gam.weekly_points})
-    redis.expire(_LEADERBOARD_KEY, _LEADERBOARD_TTL)
-
-
-def _leaderboard_from_redis(
-    current_user_id: str, limit: int, db: Session, redis
-) -> LeaderboardResponse:
-    top_raw = redis.zrevrange(_LEADERBOARD_KEY, 0, limit - 1, withscores=True)
-    total = redis.zcard(_LEADERBOARD_KEY)
-
-    entries = []
-    current_user_rank = -1
-
-    for rank, (member_bytes, score) in enumerate(top_raw, start=1):
-        member = member_bytes.decode() if isinstance(member_bytes, bytes) else member_bytes
-        display_name, user_id = member.rsplit("|", 1)
-        is_current = user_id == current_user_id
-        if is_current:
-            current_user_rank = rank
-        entries.append(LeaderboardEntry(
-            rank=rank,
-            display_name=display_name,
-            total_points=int(score),
-            current_streak_days=0,  # not stored in Redis — enriched below
-            level=1,
-            is_current_user=is_current,
-        ))
-
-    # Enrich with streak/level from DB for top entries
-    user_ids = [e.display_name.split("|")[-1] if "|" in e.display_name else "" for e in entries]
-    gams = db.query(UserGamification).filter(UserGamification.user_id.in_(
-        [member.rsplit("|", 1)[1] for member, _ in top_raw]
-    )).all()
-    gam_map = {g.user_id: g for g in gams}
-
-    for i, (member_bytes, _) in enumerate(top_raw):
-        member = member_bytes.decode() if isinstance(member_bytes, bytes) else member_bytes
-        _, uid = member.rsplit("|", 1)
-        if uid in gam_map:
-            entries[i].current_streak_days = gam_map[uid].current_streak_days
-            entries[i].level = gam_map[uid].level
-
-    # If current user not in top N, find their rank
-    if current_user_rank == -1:
-        current_user = db.query(User).filter(User.id == current_user_id).first()
-        if current_user:
-            member_key = f"{current_user.display_name}|{current_user_id}"
-            raw_rank = redis.zrevrank(_LEADERBOARD_KEY, member_key)
-            current_user_rank = (raw_rank + 1) if raw_rank is not None else total
-
-    return LeaderboardResponse(
-        entries=entries,
-        current_user_rank=current_user_rank,
-        total_users=total,
-    )
 
 
 def _leaderboard_from_db(current_user_id: str, limit: int, db: Session) -> LeaderboardResponse:

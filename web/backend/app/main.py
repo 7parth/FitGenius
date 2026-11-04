@@ -124,7 +124,6 @@ app.include_router(admin.router,           prefix="/api/admin",           tags=[
 @app.get("/api/health", tags=["Health"])
 async def health_check():
     from app.core.database import engine
-    from app.core.redis_client import get_redis
     import sqlalchemy
 
     status = {"status": "ok", "version": settings.APP_VERSION, "checks": {}}
@@ -137,18 +136,6 @@ async def health_check():
     except Exception as e:
         status["checks"]["database"] = f"error: {str(e)[:80]}"
         status["status"] = "degraded"
-
-    # Redis check
-    try:
-        redis = get_redis()
-        if redis:
-            redis.ping()
-            status["checks"]["redis"] = "ok"
-        else:
-            status["checks"]["redis"] = "not_configured"
-    except Exception as e:
-        status["checks"]["redis"] = f"error: {str(e)[:80]}"
-        # Redis down is non-critical — don't degrade overall status
 
     return status
 

@@ -121,7 +121,7 @@ class TestTokenRotation:
 # ── Logout & Token Blacklist ───────────────────────────────────────────────────
 
 class TestLogout:
-    """Logout blacklists the refresh token in Redis when available."""
+    """Logout revokes refresh tokens in PostgreSQL."""
 
     def test_logout_requires_auth(self, client, registered_user):
         resp = client.post(
@@ -129,8 +129,22 @@ class TestLogout:
             headers={"Authorization": f"Bearer {registered_user['access_token']}"},
             json={"refresh_token": registered_user["refresh_token"]},
         )
-        # 204 = success; Redis may not be available in test (that's okay)
-        assert resp.status_code in (204, 200)
+        assert resp.status_code == 204
+
+    def test_logout_revokes_refresh_token(self, client, registered_user):
+        headers = {"Authorization": f"Bearer {registered_user['access_token']}"}
+        logout = client.post(
+            "/api/auth/logout",
+            headers=headers,
+            json={"refresh_token": registered_user["refresh_token"]},
+        )
+        assert logout.status_code == 204
+
+        refresh = client.post(
+            "/api/auth/refresh",
+            json={"refresh_token": registered_user["refresh_token"]},
+        )
+        assert refresh.status_code == 401
 
     def test_logout_without_auth_header_fails(self, client, registered_user):
         resp = client.post(

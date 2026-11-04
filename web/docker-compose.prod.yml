@@ -4,14 +4,6 @@ version: "3.9"
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
-  db:
-    restart: always
-    ports: []  # Don't expose DB port in production
-
-  redis:
-    restart: always
-    ports: []  # Don't expose Redis port in production
-
   backend:
     build:
       context: ./backend
