@@ -204,6 +204,7 @@
 
 | Commit | Date | Message |
 |---|---|---|
+| `77d76d6` | 2026-11-04 | `feat: add Expo mobile app and Supabase migration` |
 | `1c2891e` | 2026-09-25 | `feat(web): complete Web App implementation with ML recommendation engine, RBAC, PWA hardening, real-time notifications, and GDPR export` |
 | `4a28fe2` | 2026-09-26 | `feat(nutrition): add AI Nutrition & Macro Planner with daily tracking and AI meal ideas` |
 | `712ebb4` | 2026-09-26 | `feat(web): replicate pixel-perfect Stitch UI design across all pages` |
