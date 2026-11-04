@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "FitGenius",
+    "slug": "fitgenius",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "fitgenius",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fitgenius.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "FitGenius needs camera access for pose estimation and form analysis.",
+        "NSPhotoLibraryUsageDescription": "FitGenius needs photo library access for progress photos."
+      }
+    },
+    "android": {
+      "package": "com.fitgenius.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f0f0f"
+      },
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FitGenius needs camera access for real-time pose estimation."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#4F46E5"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

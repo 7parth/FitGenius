@@ -1,8 +1,14 @@
-from sqlalchemy import String, Integer, Float, Enum, ForeignKey
+import enum
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from .base import Base, UUIDMixin, TimestampMixin
-import enum
+
+from .base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class WearableSource(str, enum.Enum):
@@ -51,7 +57,11 @@ class WearableData(Base, UUIDMixin, TimestampMixin):
 
     # Computed fatigue
     fatigue_level: Mapped[str] = mapped_column(
-        Enum(FatigueLevel, name="fatigue_level"),
+        Enum(
+            FatigueLevel,
+            name="fatigue_level",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         default=FatigueLevel.normal,
         nullable=False,
         index=True,

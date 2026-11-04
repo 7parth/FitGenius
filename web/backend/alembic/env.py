@@ -24,8 +24,9 @@ from app.models import Base                    # noqa: E402  — imports all mod
 # Alembic Config object
 config = context.config
 
-# Override sqlalchemy.url from app settings (never hard-code credentials here)
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# ConfigParser treats percent signs as interpolation syntax; escape them so
+# URL-encoded credentials (for example, %40 for `@`) survive unchanged.
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 # Set up loggers from alembic.ini
 if config.config_file_name is not None:

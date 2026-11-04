@@ -52,6 +52,7 @@ export default function PoseAnalysisPage() {
     const context = canvas?.getContext('2d')
     const points = results.poseLandmarks
     if (!canvas || !context || !points?.length) {
+      if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height)
       setCue('Body not detected — step back until your full body is visible')
       setScore(0)
       setJointAngle(null)
@@ -96,8 +97,8 @@ export default function PoseAnalysisPage() {
     const visibility = points.filter(point => (point.visibility ?? 0) > 0.5).length / points.length
     const formScore = Math.round(Math.max(45, Math.min(100, visibility * 100)))
     setScore(formScore)
-    const isDown = exercise.key === 'shoulder_press' ? measured > exercise.down : measured < exercise.down
-    const isUp = exercise.key === 'shoulder_press' ? measured < exercise.up : measured > exercise.up
+    const isDown = exercise.key === 'shoulder_press' ? measured < exercise.up : measured < exercise.down
+    const isUp = exercise.key === 'shoulder_press' ? measured > exercise.down : measured > exercise.up
     if (phaseRef.current === 'up' && isDown) {
       phaseRef.current = 'down'
       setCue(formScore > 80 ? 'Good control — return to the start position' : 'Keep your body aligned through the movement')
@@ -128,12 +129,15 @@ export default function PoseAnalysisPage() {
   const startCamera = async () => {
     setCameraError('')
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access requires a secure connection (HTTPS or localhost) and a supported browser.')
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' } })
       streamRef.current = stream
       if (!videoRef.current) throw new Error('Video preview is unavailable')
       videoRef.current.srcObject = stream
       await videoRef.current.play()
-      const pose = new Pose({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` })
+      const pose = new Pose({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}` })
       pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.55, minTrackingConfidence: 0.55 })
       pose.onResults(analyze)
       await pose.initialize()
@@ -144,7 +148,11 @@ export default function PoseAnalysisPage() {
       streamRef.current = null
       setCameraError(error instanceof DOMException && error.name === 'NotAllowedError'
         ? 'Camera permission denied. Allow camera access in your browser settings.'
-        : 'Unable to start pose tracking. Check camera access and your network connection.')
+        : error instanceof DOMException && error.name === 'NotFoundError'
+          ? 'No camera was found. Connect a camera and try again.'
+          : error instanceof Error
+            ? `Unable to start pose tracking: ${error.message}`
+            : 'Unable to start pose tracking. Check camera access and your network connection.')
     }
   }
 
